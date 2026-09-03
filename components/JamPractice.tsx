@@ -96,14 +96,14 @@ export default function JamPractice() {
 
   return (
     <div
-      className="relative min-h-screen cursor-pointer select-none bg-background text-foreground"
+      className="relative min-h-dvh cursor-pointer touch-manipulation select-none bg-background text-foreground [-webkit-tap-highlight-color:transparent]"
       onClick={pickRandom}
     >
       <header
-        className="fixed inset-x-0 top-0 z-20 flex items-center justify-between px-6 py-4"
+        className="fixed inset-x-0 top-0 z-20 flex items-center justify-between px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-6 sm:py-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <span className="cursor-default text-lg font-semibold tracking-tight">
+        <span className="cursor-default text-base font-semibold tracking-tight sm:text-lg">
           Jam Practice
         </span>
         <div className="flex items-center gap-2">
@@ -118,7 +118,7 @@ export default function JamPractice() {
         </div>
       </header>
 
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-4 py-24 text-center sm:px-6">
         {tunes.length === 0 && !pickError ? (
           <div className="flex flex-col items-center gap-2">
             <p className="text-2xl font-semibold">No tunes yet</p>
@@ -131,8 +131,10 @@ export default function JamPractice() {
             <p className="text-sm font-medium uppercase tracking-widest text-muted">
               Now practicing
             </p>
-            <h1 className="text-5xl font-bold">{pick.tune.name}</h1>
-            <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1 text-lg text-muted">
+            <h1 className="break-words text-4xl font-bold sm:text-5xl">
+              {pick.tune.name}
+            </h1>
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-base text-muted sm:gap-x-6 sm:text-lg">
               <span>
                 {pick.tempo ? `${pick.tempo.value} BPM` : "no enabled tempo"}
               </span>
@@ -146,7 +148,7 @@ export default function JamPractice() {
             )}
             {isCounting && (
               <div
-                className="mt-4 flex cursor-default items-center gap-3"
+                className="mt-4 flex flex-wrap cursor-default items-center justify-center gap-3"
                 onClick={(e) => e.stopPropagation()}
               >
                 <span className="text-sm font-medium text-accent">
@@ -157,7 +159,7 @@ export default function JamPractice() {
                 <button
                   type="button"
                   onClick={stopCountOff}
-                  className="rounded-full bg-surface px-4 py-1.5 text-sm hover:bg-surface-hover"
+                  className="rounded-full bg-surface px-4 py-2 text-sm hover:bg-surface-hover"
                 >
                   Stop
                 </button>

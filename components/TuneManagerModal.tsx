@@ -190,28 +190,28 @@ export default function TuneManagerModal({
       }}
     >
       <div
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-surface shadow-2xl shadow-black/20"
+        className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-surface shadow-2xl shadow-black/20"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 pt-5">
+        <div className="flex items-center justify-between px-4 pt-5 sm:px-6">
           <h2 className="text-lg font-semibold">Tunes</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-surface-hover"
+            className="flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-full hover:bg-surface-hover sm:h-8 sm:w-8"
           >
             ✕
           </button>
         </div>
 
-        <nav className="flex gap-1 px-6 pt-4">
+        <nav className="flex gap-1 overflow-x-auto px-4 pt-4 [scrollbar-width:none] sm:px-6 [&::-webkit-scrollbar]:hidden">
           {TABS.map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+              className={`shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                 tab === t
                   ? "bg-accent text-accent-foreground"
                   : "text-muted hover:bg-surface-hover"
@@ -222,7 +222,7 @@ export default function TuneManagerModal({
           ))}
         </nav>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
           {tab === "Tunes" && (
             <div className="flex flex-col gap-3">
               {tunes.length === 0 && (
@@ -243,18 +243,18 @@ export default function TuneManagerModal({
                           ({tune.timeSignature})
                         </span>
                       </span>
-                      <div className="flex gap-3">
+                      <div className="-mr-2 flex shrink-0 gap-1">
                         <button
                           onClick={() => editTune(tune)}
                           type="button"
-                          className="text-sm text-muted hover:text-foreground"
+                          className="touch-manipulation rounded-lg px-2 py-1.5 text-sm text-muted hover:text-foreground"
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => onDeleteTune(tune.id)}
                           type="button"
-                          className="text-sm text-danger hover:opacity-80"
+                          className="touch-manipulation rounded-lg px-2 py-1.5 text-sm text-danger hover:opacity-80"
                         >
                           Delete
                         </button>
@@ -268,7 +268,7 @@ export default function TuneManagerModal({
                       {tune.tempos.map((t) => (
                         <label
                           key={t.id}
-                          className={`flex cursor-pointer items-center gap-1 rounded-full bg-surface px-2 py-0.5 ${
+                          className={`flex touch-manipulation cursor-pointer items-center gap-1.5 rounded-full bg-surface px-2.5 py-1.5 ${
                             t.enabled ? "" : "opacity-40"
                           }`}
                         >
@@ -290,7 +290,7 @@ export default function TuneManagerModal({
                       {tune.keys.map((k) => (
                         <label
                           key={k.id}
-                          className={`flex cursor-pointer items-center gap-1 rounded-full bg-surface px-2 py-0.5 ${
+                          className={`flex touch-manipulation cursor-pointer items-center gap-1.5 rounded-full bg-surface px-2.5 py-1.5 ${
                             k.enabled ? "" : "opacity-40"
                           }`}
                         >
@@ -472,7 +472,7 @@ export default function TuneManagerModal({
                 Export your tune list as a CSV file, or import one to add
                 tunes in bulk.
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={exportCsv}
                   type="button"
