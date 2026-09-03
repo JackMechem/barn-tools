@@ -1,0 +1,91 @@
+let audioCtx: AudioContext | null = null;
+
+function getAudioContext(): AudioContext {
+  if (!audioCtx) {
+    const Ctor =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    audioCtx = new Ctor();
+  }
+  return audioCtx;
+}
+
+export function parseBeatsPerBar(timeSignature: string): number {
+  const numerator = Number(timeSignature.split("/")[0]);
+  return Number.isFinite(numerator) && numerator > 0 ? numerator : 4;
+}
+
+function scheduleClick(ctx: AudioContext, time: number, accent: boolean) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.frequency.value = accent ? 1500 : 900;
+  gain.gain.setValueAtTime(accent ? 0.9 : 0.5, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
+  osc.start(time);
+  osc.stop(time + 0.06);
+  return osc;
+}
+
+export type CountOff = {
+  stop: () => void;
+  durationMs: number;
+};
+
+const SCHEDULE_INTERVAL_MS = 100;
+const SCHEDULE_LOOKAHEAD_SEC = 0.2;
+
+export function playCountOff(
+  bpm: number,
+  timeSignature: string,
+  bars = 8,
+  accentFirstBeat = false,
+  continueIndefinitely = false
+): CountOff {
+  const ctx = getAudioContext();
+  if (ctx.state === "suspended") void ctx.resume();
+
+  const beatsPerBar = parseBeatsPerBar(timeSignature);
+  const beatDuration = 60 / bpm;
+  const totalBeats = beatsPerBar * bars;
+  const startTime = ctx.currentTime + 0.05;
+
+  const oscillators: OscillatorNode[] = [];
+  function scheduleBeat(i: number) {
+    const time = startTime + i * beatDuration;
+    const accent = accentFirstBeat && i % beatsPerBar === 0;
+    oscillators.push(scheduleClick(ctx, time, accent));
+  }
+
+  for (let i = 0; i < totalBeats; i++) scheduleBeat(i);
+
+  const durationMs = (totalBeats * beatDuration + 0.1) * 1000;
+
+  let intervalId: ReturnType<typeof setInterval> | null = null;
+  if (continueIndefinitely) {
+    let nextBeat = totalBeats;
+    intervalId = setInterval(() => {
+      const horizon = ctx.currentTime + SCHEDULE_LOOKAHEAD_SEC;
+      while (startTime + nextBeat * beatDuration < horizon) {
+        scheduleBeat(nextBeat);
+        nextBeat++;
+      }
+    }, SCHEDULE_INTERVAL_MS);
+  }
+
+  return {
+    durationMs: continueIndefinitely ? Infinity : durationMs,
+    stop: () => {
+      if (intervalId) clearInterval(intervalId);
+      for (const osc of oscillators) {
+        try {
+          osc.stop();
+        } catch {
+          // already stopped
+        }
+      }
+    },
+  };
+}
