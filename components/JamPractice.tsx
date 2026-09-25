@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import ThemeToggle from "./ThemeToggle";
 import TuneManagerModal from "./TuneManagerModal";
 import { CountOff, playCountOff } from "@/lib/metronome";
 import { getServerSnapshot, getSnapshot, setTunes, subscribe } from "@/lib/tunesStore";
@@ -96,29 +95,23 @@ export default function JamPractice() {
 
   return (
     <div
-      className="relative min-h-dvh cursor-pointer touch-manipulation select-none bg-background text-foreground [-webkit-tap-highlight-color:transparent]"
+      className="relative flex min-h-dvh cursor-pointer touch-manipulation select-none flex-col bg-background text-foreground [-webkit-tap-highlight-color:transparent]"
       onClick={pickRandom}
     >
-      <header
-        className="fixed inset-x-0 top-0 z-20 flex items-center justify-between px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-6 sm:py-4"
+      <div
+        className="flex justify-end px-4 pt-[calc(env(safe-area-inset-top)+4rem)] sm:px-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <span className="cursor-default text-base font-semibold tracking-tight sm:text-lg">
-          Jam Practice
-        </span>
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-          <button
-            type="button"
-            onClick={() => setIsModalOpen(true)}
-            className="rounded-full bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-          >
-            Tunes
-          </button>
-        </div>
-      </header>
+        <button
+          type="button"
+          onClick={() => setIsModalOpen(true)}
+          className="rounded-full bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+        >
+          Tunes
+        </button>
+      </div>
 
-      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-4 py-24 text-center sm:px-6">
+      <main className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-8 text-center sm:px-6">
         {tunes.length === 0 && !pickError ? (
           <div className="flex flex-col items-center gap-2">
             <p className="text-2xl font-semibold">No tunes yet</p>

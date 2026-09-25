@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
+import AppHeader from "@/components/AppHeader";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
         />
+        <AppHeader />
         {children}
       </body>
     </html>
