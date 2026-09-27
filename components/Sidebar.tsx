@@ -303,13 +303,13 @@ export default function Sidebar() {
             <Link
               href="/"
               onClick={() => setMobileOpen(false)}
-              aria-label="Barn Tools home"
+              aria-label="shed.io home"
               className="flex items-center gap-3 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-background text-accent ring-1 ring-foreground/10">
                 <BarnLogo className="h-7 w-7" />
               </span>
-              <span className="text-2xl font-bold tracking-tight text-accent">Barn Tools</span>
+              <span className="text-2xl font-bold tracking-tight text-accent">shed.io</span>
             </Link>
             <button
               type="button"
@@ -354,14 +354,14 @@ export default function Sidebar() {
           {!collapsed && (
             <Link
               href="/"
-              aria-label="Barn Tools home"
+              aria-label="shed.io home"
               className="flex min-w-0 items-center gap-2.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-accent ring-1 ring-foreground/10">
                 <BarnLogo className="h-5 w-5" />
               </span>
               <span className="truncate text-lg font-bold tracking-tight text-accent">
-                Barn Tools
+                shed.io
               </span>
             </Link>
           )}
