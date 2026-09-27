@@ -47,7 +47,7 @@ export default function Home() {
         </span>
         <span aria-hidden>·</span>
         <a
-          href="https://github.com/JackMechem/barn-tools"
+          href="https://github.com/JackMechem/jackshed.com"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-1.5 font-medium text-accent underline-offset-4 outline-none hover:underline focus-visible:underline"
