@@ -46,7 +46,7 @@ export default function ToolLayout({
       <div className="relative flex min-h-full flex-1 flex-col bg-background text-foreground">
         <div className="absolute left-0 top-[calc(env(safe-area-inset-top)+0.75rem)] flex h-10 items-center pl-16 sm:pl-[4.5rem] lg:top-2 lg:pl-6">
           <h1 className="flex items-center gap-2 text-xl font-semibold text-accent">
-            {TitleIcon && <TitleIcon className="h-5 w-5 shrink-0" />}
+            {TitleIcon && <TitleIcon className="h-7 w-7 shrink-0" />}
             {title}
           </h1>
           {help && <div className="ml-3">{help}</div>}

@@ -9,6 +9,7 @@ export default function CollapsiblePanel({
   title,
   icon: Icon,
   action,
+  toggle,
   children,
 }: {
   id: string;
@@ -16,9 +17,16 @@ export default function CollapsiblePanel({
   icon: React.ComponentType<{ className?: string }>;
   /** Extra control shown at the right of the header (stays visible when collapsed). */
   action?: React.ReactNode;
+  /**
+   * A switch shown next to the chevron that gates the whole section: while off, there's
+   * nothing to expand, so the chevron is hidden and the body stays collapsed.
+   */
+  toggle?: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean };
   children: React.ReactNode;
 }) {
-  const [{ open }, update] = usePersistedSettings(panelKey(id), PANEL_DEFAULTS);
+  const [{ open: storedOpen }, update] = usePersistedSettings(panelKey(id), PANEL_DEFAULTS);
+  const canExpand = !toggle || toggle.checked;
+  const open = canExpand && storedOpen;
   const bodyId = `panel-${id}`;
 
   return (
@@ -26,7 +34,7 @@ export default function CollapsiblePanel({
       <div className="flex items-center">
         <button
           type="button"
-          onClick={() => update({ open: !open })}
+          onClick={() => canExpand && update({ open: !storedOpen })}
           aria-expanded={open}
           aria-controls={bodyId}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-4 py-3 text-left text-sm font-semibold text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent sm:px-6"
@@ -34,13 +42,39 @@ export default function CollapsiblePanel({
           <Icon className="h-4 w-4 shrink-0" />
           {title}
         </button>
+        {toggle && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={toggle.checked}
+            aria-label={title}
+            onClick={() => toggle.onChange(!toggle.checked)}
+            disabled={toggle.disabled}
+            className={`relative mr-1 h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+              toggle.checked ? "bg-accent" : "bg-background"
+            }`}
+          >
+            <span
+              className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-foreground transition-transform ${
+                toggle.checked ? "translate-x-4" : ""
+              }`}
+            />
+          </button>
+        )}
         {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
+        {/*
+          Always rendered (never added/removed), so a persisted `toggle.checked` that differs
+          between the server default and the saved client value can't cause a hydration
+          mismatch. It's just hidden with CSS when there's nothing to expand.
+        */}
         <button
           type="button"
-          onClick={() => update({ open: !open })}
+          onClick={() => canExpand && update({ open: !storedOpen })}
           tabIndex={-1}
           aria-hidden
-          className="flex h-10 w-10 shrink-0 items-center justify-center text-muted hover:text-foreground sm:mr-3"
+          className={`flex h-10 shrink-0 items-center justify-center text-muted hover:text-foreground sm:mr-3 ${
+            canExpand ? "w-10" : "w-0 invisible"
+          }`}
         >
           <svg
             viewBox="0 0 20 20"

@@ -136,11 +136,11 @@ function SearchBox({
 
   return (
     <label
-      className={`mb-3 flex items-center gap-2 ${large ? "rounded-2xl" : "rounded-lg"} bg-background px-3 text-muted focus-within:ring-2 focus-within:ring-accent ${
-        large ? "py-3 text-lg" : "py-2 text-sm"
+      className={`mb-3 flex items-center gap-2 ${large ? "rounded-xl" : "rounded-lg"} bg-background px-3 text-muted focus-within:ring-2 focus-within:ring-accent ${
+        large ? "py-2.5 text-base" : "py-2 text-sm"
       }`}
     >
-      <SearchIcon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
+      <SearchIcon className="h-4 w-4 shrink-0" />
       <input
         type="search"
         value={query}
@@ -170,7 +170,7 @@ function NavItems({
   return (
     <nav className="flex flex-col gap-1">
       {links.length === 0 && (
-        <p className={`px-3 text-muted ${large ? "text-lg" : "text-sm"}`}>No tools found</p>
+        <p className={`px-3 text-muted ${large ? "text-base" : "text-sm"}`}>No tools found</p>
       )}
       {links.map(({ href, label, icon: Icon, desktopOnly }) => {
         const active = pathname === href;
@@ -181,9 +181,9 @@ function NavItems({
               key={href}
               aria-disabled="true"
               title="Needs a larger screen"
-              className="flex cursor-not-allowed items-center gap-3 rounded-2xl px-3 py-4 text-xl font-medium text-muted opacity-40"
+              className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-3 text-base font-medium text-muted opacity-40"
             >
-              <Icon className="h-6 w-6 shrink-0" />
+              <Icon className="h-5 w-5 shrink-0" />
               <span className="truncate">{label}</span>
               <span className="ml-auto text-xs font-normal">Desktop only</span>
             </div>
@@ -195,15 +195,15 @@ function NavItems({
             href={href}
             onClick={onNavigate}
             title={collapsed ? label : undefined}
-            className={`flex items-center gap-3 ${large ? "rounded-2xl" : "rounded-lg"} px-3 font-medium transition-colors ${
-              large ? "py-4 text-xl" : "py-2 text-sm"
+            className={`flex items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} border px-3 font-medium transition-colors ${
+              large ? "py-3 text-base" : "py-2 text-sm"
             } ${collapsed ? "justify-center" : ""} ${
               active
-                ? "bg-accent text-accent-foreground"
-                : "text-muted hover:bg-surface-hover hover:text-foreground"
+                ? "border-accent/30 bg-accent/10 text-accent"
+                : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground"
             }`}
           >
-            <Icon className={large ? "h-6 w-6 shrink-0" : "h-4 w-4 shrink-0"} />
+            <Icon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
             {!collapsed && <span className="truncate">{label}</span>}
           </Link>
         );
@@ -226,11 +226,11 @@ function ThemeButton({
       type="button"
       onClick={onClick}
       title={collapsed ? "Theme" : undefined}
-      className={`flex w-full items-center gap-3 ${large ? "rounded-2xl" : "rounded-lg"} px-3 font-medium text-muted transition-colors hover:bg-surface-hover hover:text-foreground ${
-        large ? "py-4 text-xl" : "py-2 text-sm"
+      className={`flex w-full items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} px-3 font-medium text-muted transition-colors hover:bg-surface-hover hover:text-foreground ${
+        large ? "py-3 text-base" : "py-2 text-sm"
       } ${collapsed ? "justify-center" : ""}`}
     >
-      <PaletteIcon className={large ? "h-6 w-6 shrink-0" : "h-4 w-4 shrink-0"} />
+      <PaletteIcon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
       {!collapsed && <span>Theme</span>}
     </button>
   );
@@ -306,10 +306,10 @@ export default function Sidebar() {
               aria-label="shed.io home"
               className="flex items-center gap-3 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-background text-accent ring-1 ring-foreground/10">
-                <BarnLogo className="h-7 w-7" />
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-background text-accent ring-1 ring-foreground/10">
+                <BarnLogo className="h-6 w-6" />
               </span>
-              <span className="text-2xl font-bold tracking-tight text-accent">shed.io</span>
+              <span className="text-xl font-bold tracking-tight text-accent">shed.io</span>
             </Link>
             <button
               type="button"
@@ -360,9 +360,7 @@ export default function Sidebar() {
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-accent ring-1 ring-foreground/10">
                 <BarnLogo className="h-5 w-5" />
               </span>
-              <span className="truncate text-lg font-bold tracking-tight text-accent">
-                shed.io
-              </span>
+              <span className="truncate text-lg font-bold tracking-tight text-accent">shed.io</span>
             </Link>
           )}
         </div>

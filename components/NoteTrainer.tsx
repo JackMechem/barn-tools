@@ -19,7 +19,7 @@ import {
   startAudioInput,
 } from "@/lib/audioInput";
 import { Grade, describePitch, frequencyToMidi, gradePitch, scoreOf } from "@/lib/noteGrade";
-import { parseRange, randomNoteInRange } from "@/lib/noteRange";
+import { parseNote, parseRange, randomNoteInRange } from "@/lib/noteRange";
 import { usePersistedSettings } from "@/lib/usePersistedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 import { DEFAULT_TONE_ID, TONES, playNote } from "@/lib/tones";
@@ -56,6 +56,10 @@ type Session = {
   notes: string[];
   stable: number;
   last: number | null;
+  /** The previous note's pitch, so its tail ringing into this note isn't graded against it. */
+  previousMidi: number | null;
+  /** False until the previous note has stopped (silence or a genuinely new pitch). */
+  settled: boolean;
 };
 
 type Summary = { results: Grade[]; notes: string[] };
@@ -66,7 +70,6 @@ const DEFAULT_SETTINGS = {
   instrumentId: INSTRUMENTS[0].id,
   customRange: "A1-A6",
   intervalSeconds: DEFAULT_INTERVAL_SECONDS,
-  advanceOnCorrect: false,
   ignoreOctave: false,
   toleranceCents: 50,
   holdMs: 120,
@@ -128,6 +131,71 @@ function AdvancedSlider({
   );
 }
 
+const RING_RADIUS = 46;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+/** A ring around the note that drains as the interval for the current note runs out. */
+function CountdownRing({
+  active,
+  timerRef,
+}: {
+  active: boolean;
+  timerRef: React.RefObject<{ startedAt: number; durationMs: number }>;
+  // (useRef always returns a non-null current here, so RefObject is fine as the prop type)
+}) {
+  const circleRef = useRef<SVGCircleElement>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    let frame = 0;
+    const tick = () => {
+      const { startedAt, durationMs } = timerRef.current;
+      const fraction = Math.min(1, Math.max(0, (performance.now() - startedAt) / durationMs));
+      circleRef.current?.style.setProperty(
+        "stroke-dashoffset",
+        String(RING_CIRCUMFERENCE * fraction),
+      );
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [active, timerRef]);
+
+  if (!active) return null;
+
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 100 100"
+      className="pointer-events-none absolute inset-0 h-full w-full -rotate-90"
+    >
+      <circle
+        cx="50"
+        cy="50"
+        r={RING_RADIUS}
+        fill="none"
+        strokeWidth="4"
+        className="stroke-surface-hover"
+      />
+      <circle
+        ref={circleRef}
+        cx="50"
+        cy="50"
+        r={RING_RADIUS}
+        fill="none"
+        strokeWidth="4"
+        strokeLinecap="round"
+        className="stroke-accent"
+        style={{
+          strokeDasharray: RING_CIRCUMFERENCE,
+          strokeDashoffset: 0,
+          transition: "stroke-dashoffset 0.1s linear",
+        }}
+      />
+    </svg>
+  );
+}
+
 export default function NoteTrainer() {
   const [settings, updateSettings] = usePersistedSettings(SETTINGS_KEY, DEFAULT_SETTINGS);
   const {
@@ -137,7 +205,6 @@ export default function NoteTrainer() {
     showNext,
     toneId,
     listenMode,
-    advanceOnCorrect,
     ignoreOctave,
     toleranceCents,
     holdMs,
@@ -176,13 +243,13 @@ export default function NoteTrainer() {
   const [summary, setSummary] = useState<Summary | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const noteTimerRef = useRef({ startedAt: 0, durationMs: 1000 });
   const upcomingRef = useRef<string | null>(null);
   const playSoundRef = useRef(playSound);
   const toneIdRef = useRef(toneId);
   const inputRef = useRef<AudioInput | null>(null);
   const mountedRef = useRef(true);
   const sessionRef = useRef<Session | null>(null);
-  const advanceOnCorrectRef = useRef(advanceOnCorrect);
   const listenCfg = useRef({
     ignoreOctave,
     toleranceCents,
@@ -198,7 +265,6 @@ export default function NoteTrainer() {
   useEffect(() => {
     playSoundRef.current = playSound;
     toneIdRef.current = toneId;
-    advanceOnCorrectRef.current = advanceOnCorrect;
     listenCfg.current = {
       ignoreOctave,
       toleranceCents,
@@ -211,7 +277,6 @@ export default function NoteTrainer() {
   }, [
     playSound,
     toneId,
-    advanceOnCorrect,
     ignoreOctave,
     toleranceCents,
     holdMs,
@@ -287,6 +352,8 @@ export default function NoteTrainer() {
     if (freq === null) {
       session.stable = 0;
       session.last = null;
+      // Silence means whatever was ringing has stopped, so grading can resume.
+      session.settled = true;
       setHeard(null);
       return;
     }
@@ -302,6 +369,13 @@ export default function NoteTrainer() {
       session.stable = 1;
     }
     if (session.stable < cfg.holdFrames) return;
+
+    // The tail of the previous note ringing on shouldn't be graded as an attempt at this one;
+    // wait until it's stopped or a genuinely different pitch is heard.
+    if (!session.settled) {
+      if (nearest === session.previousMidi) return;
+      session.settled = true;
+    }
 
     // Once the note has been played right (cleanly or after a slip), later notes don't change it.
     if (session.best === "correct" || session.best === "partial") return;
@@ -322,7 +396,7 @@ export default function NoteTrainer() {
       const result: Grade = session.wrongPlayed && cfg.partialCredit ? "partial" : "correct";
       session.best = result;
       setStatus(result);
-      if (advanceOnCorrectRef.current && !skipTimeoutRef.current) {
+      if (!skipTimeoutRef.current) {
         // Let the green glow show briefly, then move on to the next note.
         const index = session.index;
         skipTimeoutRef.current = setTimeout(() => {
@@ -346,8 +420,6 @@ export default function NoteTrainer() {
     inputRef.current = null;
 
     const listening = listenMode;
-    // With "next note when correct" there is no timer; notes advance only when played right (or skipped).
-    const waitForCorrect = listening && advanceOnCorrect;
     if (listening) {
       try {
         const input = await startAudioInput(
@@ -376,6 +448,8 @@ export default function NoteTrainer() {
         notes: [],
         stable: 0,
         last: null,
+        previousMidi: null,
+        settled: true,
       };
     } else {
       sessionRef.current = null;
@@ -403,6 +477,10 @@ export default function NoteTrainer() {
           return;
         }
         session.index++;
+        // A held note ringing on shouldn't be graded against the next target; wait for it to
+        // stop (silence, or a pitch that isn't this one) before grading resumes.
+        session.previousMidi = session.target !== null ? parseNote(session.target) : null;
+        session.settled = session.previousMidi === null;
         session.best = null;
         session.wrongPlayed = false;
         session.stable = 0;
@@ -417,6 +495,7 @@ export default function NoteTrainer() {
       const following = isLast ? null : randomNoteInRange(range);
       upcomingRef.current = following;
       if (session) session.target = next;
+      noteTimerRef.current = { startedAt: performance.now(), durationMs: seconds * 1000 };
       setNote(next);
       setNextNote(following);
       if (playSoundRef.current && !session) {
@@ -424,25 +503,29 @@ export default function NoteTrainer() {
       }
     };
 
-    // Moving on early restarts the timer so the next note gets its full time.
+    // Moving on early (a correct note, or the skip button) restarts the timer so the next
+    // note gets its own full max time rather than continuing on the old note's schedule.
     skipRef.current = () => {
       advance();
-      if (sessionRef.current && !waitForCorrect) {
+      if (sessionRef.current) {
         if (intervalRef.current) clearInterval(intervalRef.current);
         intervalRef.current = setInterval(advance, seconds * 1000);
       }
     };
 
     advance();
-    setWaiting(waitForCorrect);
+    setWaiting(listening);
     setRunning(true);
-    if (!waitForCorrect) intervalRef.current = setInterval(advance, seconds * 1000);
+    intervalRef.current = setInterval(advance, seconds * 1000);
   }
 
-  const intervalOff = listenMode && advanceOnCorrect;
   // With "Ignore octave" on, the octave number is left out everywhere notes are shown.
   const noteLabel = (n: string) => (listenMode && ignoreOctave ? n.replace(/\d+$/, "") : n);
   const glow = running && status ? GRADE_COLOR[status] : null;
+  // The countdown ring only makes sense while a timer is actually running down.
+  // A max-time timer now always runs while a session is active, even in "next note when
+  // correct" mode, so the ring can just track `running`.
+  const showCountdown = running;
   const score = summary ? scoreOf(summary.results) : 0;
   const tally = (grade: Grade) => summary?.results.filter((g) => g === grade).length ?? 0;
 
@@ -483,48 +566,43 @@ export default function NoteTrainer() {
               </label>
             )}
 
-            <label className="flex flex-col gap-2 text-sm">
-              <span className="flex items-center justify-between font-medium text-muted">
-                Interval{intervalOff ? " (off — waiting for the right note)" : ""}
-                <span className="tabular-nums text-foreground">{intervalSeconds}s</span>
-              </span>
-              <input
-                type="range"
+            {/* In listen mode this becomes "Max time", shown in the Listen mode section instead. */}
+            {!listenMode && (
+              <AdvancedSlider
+                label="Interval"
+                value={intervalSeconds}
+                unit="s"
                 min={MIN_INTERVAL_SECONDS}
                 max={MAX_INTERVAL_SECONDS}
                 step={0.5}
-                value={intervalSeconds}
-                onChange={(e) => setIntervalSeconds(Number(e.target.value))}
-                disabled={running || intervalOff}
-                style={
-                  {
-                    "--progress": `${((intervalSeconds - MIN_INTERVAL_SECONDS) / (MAX_INTERVAL_SECONDS - MIN_INTERVAL_SECONDS)) * 100}%`,
-                  } as React.CSSProperties
-                }
-                className="slider h-6 w-full cursor-pointer disabled:cursor-default disabled:opacity-60"
+                disabled={running}
+                onChange={setIntervalSeconds}
               />
-            </label>
+            )}
           </CollapsiblePanel>
 
-          <CollapsiblePanel id="note-listen" title="Listen mode" icon={MicIcon}>
-            <SwitchRow
-              label="Check what I play"
-              checked={listenMode}
-              onChange={setListenMode}
+          <CollapsiblePanel
+            id="note-listen"
+            title="Listen mode"
+            icon={MicIcon}
+            toggle={{ checked: listenMode, onChange: setListenMode, disabled: running }}
+          >
+            <AdvancedSlider
+              label="Max time"
+              value={intervalSeconds}
+              unit="s"
+              min={MIN_INTERVAL_SECONDS}
+              max={MAX_INTERVAL_SECONDS}
+              step={0.5}
               disabled={running}
+              hint="The longest you get on a note before it's marked and moved past. A correct note advances sooner."
+              onChange={setIntervalSeconds}
             />
 
             <SwitchRow
               label="Ignore octave"
               checked={ignoreOctave}
               onChange={(checked) => updateSettings({ ignoreOctave: checked })}
-              disabled={!listenMode || running}
-            />
-
-            <SwitchRow
-              label="Next note when correct"
-              checked={advanceOnCorrect}
-              onChange={(checked) => updateSettings({ advanceOnCorrect: checked })}
               disabled={!listenMode || running}
             />
 
@@ -601,7 +679,7 @@ export default function NoteTrainer() {
                 max={2000}
                 step={100}
                 disabled={running || !listenMode}
-                hint="How long a correct note stays lit before moving on (needs Next note when correct)."
+                hint="How long a correct note stays lit before moving on to the next one."
                 onChange={(v) => updateSettings({ advanceDelayMs: v })}
               />
               <AdvancedSlider
@@ -650,14 +728,6 @@ export default function NoteTrainer() {
                 Reset advanced settings
               </button>
             </Disclosure>
-
-            <p className="text-xs text-muted">
-              Listens through your microphone or audio interface. A note within the tuning tolerance
-              (50 cents by default) counts as correct, so slightly out-of-tune strings still pass.
-              Play a wrong note first and the right one only earns partial credit. The right note in
-              the wrong octave is wrong, unless you turn on Ignore octave. Note sound is off in this
-              mode so the mic doesn&apos;t hear it.
-            </p>
           </CollapsiblePanel>
 
           <CollapsiblePanel id="note-sound" title="Sound & display" icon={SlidersIcon}>
@@ -685,19 +755,22 @@ export default function NoteTrainer() {
     >
       <div className="flex flex-col items-center gap-2">
         <div className="relative">
-          <h1
-            className="text-6xl font-bold tabular-nums transition-[color,text-shadow] duration-200 sm:text-7xl"
-            style={
-              glow
-                ? {
-                    color: glow,
-                    textShadow: `0 0 12px ${glow}, 0 0 32px ${glow}, 0 0 64px ${glow}`,
-                  }
-                : undefined
-            }
-          >
-            {note ? noteLabel(note) : "—"}
-          </h1>
+          <div className="relative flex h-40 w-40 items-center justify-center sm:h-48 sm:w-48">
+            <CountdownRing active={showCountdown} timerRef={noteTimerRef} />
+            <h1
+              className="relative z-10 text-6xl font-bold tabular-nums transition-[color,text-shadow] duration-200 sm:text-7xl"
+              style={
+                glow
+                  ? {
+                      color: glow,
+                      textShadow: `0 0 12px ${glow}, 0 0 32px ${glow}, 0 0 64px ${glow}`,
+                    }
+                  : undefined
+              }
+            >
+              {note ? noteLabel(note) : "—"}
+            </h1>
+          </div>
           {showNext && nextNote && running && (
             <span
               aria-label={`Next note ${noteLabel(nextNote)}`}
