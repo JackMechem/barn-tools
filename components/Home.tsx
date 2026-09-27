@@ -17,7 +17,7 @@ export default function Home() {
         </div>
 
         <div className="flex flex-col items-center gap-2">
-          <h1 className="text-5xl font-bold tracking-tight text-accent sm:text-6xl">shed.io</h1>
+          <h1 className="text-5xl font-bold tracking-tight text-accent sm:text-6xl">jshed.io</h1>
           <p className="max-w-md text-lg text-muted">Collection of practice tools for musicians</p>
         </div>
 
