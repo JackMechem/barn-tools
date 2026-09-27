@@ -303,13 +303,13 @@ export default function Sidebar() {
             <Link
               href="/"
               onClick={() => setMobileOpen(false)}
-              aria-label="jshed.io home"
+              aria-label="jackshed home"
               className="flex items-center gap-3 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-background text-accent ring-1 ring-foreground/10">
                 <BarnLogo className="h-6 w-6" />
               </span>
-              <span className="text-xl font-bold tracking-tight text-accent">jshed.io</span>
+              <span className="text-xl font-bold tracking-tight text-accent">jackshed</span>
             </Link>
             <button
               type="button"
@@ -354,13 +354,13 @@ export default function Sidebar() {
           {!collapsed && (
             <Link
               href="/"
-              aria-label="jshed.io home"
+              aria-label="jackshed home"
               className="flex min-w-0 items-center gap-2.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-accent ring-1 ring-foreground/10">
                 <BarnLogo className="h-5 w-5" />
               </span>
-              <span className="truncate text-lg font-bold tracking-tight text-accent">jshed.io</span>
+              <span className="truncate text-lg font-bold tracking-tight text-accent">jackshed</span>
             </Link>
           )}
         </div>

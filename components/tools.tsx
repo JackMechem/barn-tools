@@ -307,7 +307,6 @@ export function HomeIcon({ className }: { className?: string }) {
 }
 
 export const NAV_LINKS = [
-  { href: "/", label: "Home", description: "", icon: HomeIcon },
   {
     href: "/jam-practice",
     label: "Jam Practice",
