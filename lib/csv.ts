@@ -18,15 +18,9 @@ function encodeKeys(keys: Key[]): string {
 export function tunesToCsv(tunes: Tune[]): string {
   const header = "name,tempos,keys,timeSignature,notes";
   const rows = tunes.map((tune) =>
-    [
-      tune.name,
-      encodeTempos(tune.tempos),
-      encodeKeys(tune.keys),
-      tune.timeSignature,
-      tune.notes,
-    ]
+    [tune.name, encodeTempos(tune.tempos), encodeKeys(tune.keys), tune.timeSignature, tune.notes]
       .map(csvEscape)
-      .join(",")
+      .join(","),
   );
   return [header, ...rows].join("\n");
 }
@@ -126,13 +120,7 @@ export function csvToTunes(text: string): Tune[] {
   return dataRows
     .filter((r) => r.some((cell) => cell.trim().length > 0))
     .map((r) => {
-      const [
-        name = "",
-        tempos = "",
-        keys = "",
-        timeSignature = "",
-        notes = "",
-      ] = r;
+      const [name = "", tempos = "", keys = "", timeSignature = "", notes = ""] = r;
       return {
         id: makeId(),
         name: name.trim(),
@@ -143,4 +131,16 @@ export function csvToTunes(text: string): Tune[] {
       };
     })
     .filter((t) => t.name.length > 0);
+}
+
+export function downloadTunesCsv(tunes: Tune[], filename = "jam-practice-tunes.csv"): void {
+  const blob = new Blob([tunesToCsv(tunes)], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }

@@ -1,0 +1,525 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import CollapsiblePanel from "@/components/CollapsiblePanel";
+import ToolLayout from "@/components/ToolLayout";
+import { InstrumentIcon } from "@/components/InstrumentIcons";
+import KeyHint from "@/components/KeyHint";
+import PanelsToggle from "@/components/PanelsToggle";
+import Select from "@/components/Select";
+import TunerDial from "@/components/TunerDial";
+import { MicIcon, SlidersIcon, TunerIcon } from "@/components/tools";
+import {
+  AudioInput,
+  InputDevice,
+  SENSITIVITY,
+  listAudioInputs,
+  startAudioInput,
+} from "@/lib/audioInput";
+import { midiToNote, parseNote } from "@/lib/noteRange";
+import { startTone, ToneHandle } from "@/lib/toneGenerator";
+import { TUNER_INSTRUMENTS, getInstrument, getTuning } from "@/lib/tunings";
+import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSpaceToggle } from "@/lib/useSpaceToggle";
+
+const PANEL_IDS = ["tuner-instrument", "tuner-input", "tuner-tone"];
+const SETTINGS_KEY = "jam-practice-tuner";
+const DEFAULT_SETTINGS = {
+  instrumentId: "guitar",
+  tuningId: "standard",
+  refA: 440,
+  sensitivity: "normal",
+  waveform: "sine",
+  inputDeviceId: "",
+  sustain: false,
+  octave: 3,
+};
+
+const MIN_REF = 415;
+const MAX_REF = 466;
+const MIN_OCTAVE = 0;
+const MAX_OCTAVE = 7;
+const HOLD_MS = 800;
+const TONE_SECONDS = 2.5;
+
+const WAVEFORMS: { value: OscillatorType; label: string }[] = [
+  { value: "sine", label: "Sine" },
+  { value: "triangle", label: "Triangle" },
+  { value: "sawtooth", label: "Sawtooth" },
+  { value: "square", label: "Square" },
+];
+
+const IN_TUNE = "#22c55e";
+const CLOSE = "#f59e0b";
+const OFF = "#ef4444";
+
+function centsColor(cents: number) {
+  const abs = Math.abs(cents);
+  return abs <= 8 ? IN_TUNE : abs <= 25 ? CLOSE : OFF;
+}
+
+type Reading = { target: number; cents: number; freq: number };
+type Playing = { midi: number };
+
+function freqOfMidi(midi: number, refA: number) {
+  return refA * 2 ** ((midi - 69) / 12);
+}
+
+function sliderStyle(value: number, min: number, max: number) {
+  return { "--progress": `${((value - min) / (max - min)) * 100}%` } as React.CSSProperties;
+}
+
+export default function Tuner() {
+  const [settings, updateSettings] = usePersistedSettings(SETTINGS_KEY, DEFAULT_SETTINGS);
+  const instrument = getInstrument(settings.instrumentId);
+  const tuning = getTuning(instrument, settings.tuningId);
+  const refA = Math.min(MAX_REF, Math.max(MIN_REF, settings.refA));
+  const octave = Math.min(MAX_OCTAVE, Math.max(MIN_OCTAVE, Math.round(settings.octave)));
+  const { sustain, waveform, sensitivity } = settings;
+  const transpose = instrument.transpose;
+
+  const stringMidis = tuning.strings.flatMap((s) => {
+    const midi = parseNote(s);
+    return midi === null ? [] : [midi];
+  });
+
+  const [listening, setListening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reading, setReading] = useState<Reading | null>(null);
+  const [playing, setPlaying] = useState<Playing | null>(null);
+  const [inputs, setInputs] = useState<InputDevice[]>([]);
+
+  const inputRef = useRef<AudioInput | null>(null);
+  const toneRef = useRef<ToneHandle | null>(null);
+  const mountedRef = useRef(true);
+  const lastSeen = useRef(0);
+  const candidate = useRef<{ target: number; frames: number } | null>(null);
+  const cfg = useRef({ refA, stringMidis, playing: false, rms: SENSITIVITY.normal.rms });
+
+  useEffect(() => {
+    cfg.current = {
+      refA,
+      stringMidis,
+      playing: playing !== null,
+      rms: (SENSITIVITY[sensitivity] ?? SENSITIVITY.normal).rms,
+    };
+  });
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      inputRef.current?.stop();
+      toneRef.current?.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void listAudioInputs()
+        .then((devices) => {
+          if (!cancelled) setInputs(devices);
+        })
+        .catch(() => {});
+    };
+    refresh();
+    navigator.mediaDevices?.addEventListener?.("devicechange", refresh);
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices?.removeEventListener?.("devicechange", refresh);
+    };
+  }, []);
+
+  const inputDeviceId = inputs.some((d) => d.id === settings.inputDeviceId)
+    ? settings.inputDeviceId
+    : "";
+
+  function handleFrame(freq: number | null) {
+    const { refA: ref, stringMidis: strings, playing: tonePlaying } = cfg.current;
+    // The mic would just hear our own reference tone.
+    if (tonePlaying) {
+      candidate.current = null;
+      return;
+    }
+    const now = performance.now();
+    if (freq === null) {
+      candidate.current = null;
+      if (now - lastSeen.current > HOLD_MS) setReading(null);
+      return;
+    }
+    const midi = 69 + 12 * Math.log2(freq / ref);
+    const target =
+      strings.length > 0
+        ? strings.reduce((best, s) => (Math.abs(midi - s) < Math.abs(midi - best) ? s : best))
+        : Math.round(midi);
+
+    const c = candidate.current;
+    candidate.current =
+      c && c.target === target ? { target, frames: c.frames + 1 } : { target, frames: 1 };
+    if (candidate.current.frames < 2) return;
+
+    lastSeen.current = now;
+    const raw = (midi - target) * 100;
+    setReading((prev) => ({
+      target,
+      freq,
+      cents: prev && prev.target === target ? prev.cents * 0.5 + raw * 0.5 : raw,
+    }));
+  }
+
+  async function startListening() {
+    setError(null);
+    inputRef.current?.stop();
+    inputRef.current = null;
+    try {
+      const input = await startAudioInput(
+        inputDeviceId,
+        ({ freq }) => handleFrame(freq),
+        () => cfg.current.rms,
+      );
+      if (!mountedRef.current) {
+        input.stop();
+        return;
+      }
+      inputRef.current = input;
+      void listAudioInputs().then(setInputs);
+      setListening(true);
+    } catch {
+      setError("Couldn't open the audio input. Check the browser's microphone permission.");
+    }
+  }
+
+  function stopListening() {
+    inputRef.current?.stop();
+    inputRef.current = null;
+    candidate.current = null;
+    setListening(false);
+    setReading(null);
+  }
+
+  useSpaceToggle(listening ? stopListening : () => void startListening());
+
+  function stopTone() {
+    toneRef.current?.stop();
+    toneRef.current = null;
+    setPlaying(null);
+  }
+
+  /** `midi` is the concert pitch to sound. */
+  function playMidi(midi: number) {
+    const wasSame = playing?.midi === midi;
+    stopTone();
+    if (wasSame) return;
+    setReading(null);
+    const freq = freqOfMidi(midi, refA);
+    toneRef.current = startTone(
+      freq,
+      waveform as OscillatorType,
+      0.35,
+      sustain ? undefined : TONE_SECONDS,
+      () => {
+        if (mountedRef.current && !sustain) {
+          setPlaying((p) => (p?.midi === midi ? null : p));
+        }
+      },
+    );
+    setPlaying({ midi });
+  }
+
+  function playPitchClass(pc: number) {
+    // Ring labels are written notes, so undo the instrument's transposition.
+    const written = (octave + 1) * 12 + pc;
+    playMidi(written - transpose);
+  }
+
+  const written = reading ? reading.target + transpose : null;
+  const detectedPc = written === null ? null : ((written % 12) + 12) % 12;
+  const color = reading ? centsColor(reading.cents) : "";
+  const cents = reading ? Math.max(-50, Math.min(50, reading.cents)) : 0;
+  const playingWritten = playing ? playing.midi + transpose : null;
+  const playingPc = playingWritten === null ? null : ((playingWritten % 12) + 12) % 12;
+  const noteName = written === null ? null : midiToNote(written);
+  const noteLetter = noteName ? noteName.replace(/\d+$/, "") : null;
+  const noteOctave = noteName ? noteName.match(/\d+$/)?.[0] : null;
+  const verdict = !reading
+    ? ""
+    : Math.abs(reading.cents) <= 8
+      ? "In tune"
+      : reading.cents < 0
+        ? "Flat ♭"
+        : "Sharp ♯";
+
+  return (
+    <ToolLayout
+      title="Tuner"
+      options={
+        <>
+          <PanelsToggle ids={PANEL_IDS} />
+
+          <CollapsiblePanel id="tuner-instrument" title="Instrument" icon={TunerIcon}>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-muted">Instrument</span>
+              <Select
+                value={instrument.id}
+                onChange={(instrumentId) => {
+                  const next = getInstrument(instrumentId);
+                  updateSettings({ instrumentId, tuningId: next.tunings[0].id });
+                }}
+                options={TUNER_INSTRUMENTS.map((i) => ({
+                  value: i.id,
+                  label: i.label,
+                  icon: <InstrumentIcon id={i.id} />,
+                }))}
+              />
+            </label>
+            {instrument.tunings.length > 1 && (
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-muted">Tuning</span>
+                <Select
+                  value={tuning.id}
+                  onChange={(tuningId) => updateSettings({ tuningId })}
+                  options={instrument.tunings.map((t) => ({ value: t.id, label: t.label }))}
+                />
+              </label>
+            )}
+            {transpose !== 0 && (
+              <p className="text-xs text-muted">
+                Notes are shown as written for this transposing instrument, not concert pitch.
+              </p>
+            )}
+          </CollapsiblePanel>
+
+          <CollapsiblePanel id="tuner-input" title="Input" icon={MicIcon}>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-muted">Audio input</span>
+              <Select
+                value={inputDeviceId}
+                onChange={(id) => updateSettings({ inputDeviceId: id })}
+                disabled={listening}
+                options={[
+                  { value: "", label: "Default input" },
+                  ...inputs.map((d) => ({ value: d.id, label: d.label })),
+                ]}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-muted">Sensitivity</span>
+              <Select
+                value={sensitivity in SENSITIVITY ? sensitivity : "normal"}
+                onChange={(value) => updateSettings({ sensitivity: value })}
+                options={Object.entries(SENSITIVITY).map(([value, { label }]) => ({
+                  value,
+                  label,
+                }))}
+              />
+            </label>
+          </CollapsiblePanel>
+
+          <CollapsiblePanel id="tuner-tone" title="Reference & tone" icon={SlidersIcon}>
+            <label className="flex flex-col gap-2 text-sm">
+              <span className="flex items-center justify-between font-medium text-muted">
+                Reference pitch (A4)
+                <span className="flex items-center gap-2 tabular-nums text-foreground">
+                  {refA} Hz
+                  {refA !== 440 && (
+                    <button
+                      type="button"
+                      onClick={() => updateSettings({ refA: 440 })}
+                      className="rounded-md bg-background px-2 py-0.5 text-xs font-medium text-muted hover:text-foreground"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </span>
+              </span>
+              <input
+                type="range"
+                min={MIN_REF}
+                max={MAX_REF}
+                step={1}
+                value={refA}
+                onChange={(e) => updateSettings({ refA: Number(e.target.value) })}
+                style={sliderStyle(refA, MIN_REF, MAX_REF)}
+                className="slider h-6 w-full cursor-pointer"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-muted">Tone generator sound</span>
+              <Select
+                value={waveform}
+                onChange={(value) => updateSettings({ waveform: value })}
+                options={WAVEFORMS}
+              />
+            </label>
+          </CollapsiblePanel>
+        </>
+      }
+    >
+      <TunerDial
+        detectedPc={detectedPc}
+        detectedColor={color}
+        playingPc={playingPc}
+        onSelect={playPitchClass}
+      >
+        <button
+          type="button"
+          onClick={() => updateSettings({ sustain: !sustain })}
+          aria-pressed={sustain}
+          className={`pointer-events-auto rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+            sustain
+              ? "bg-accent text-accent-foreground"
+              : "bg-surface text-muted hover:text-foreground"
+          }`}
+        >
+          Sustain
+        </button>
+
+        <div className="flex flex-col items-center leading-tight">
+          {noteLetter ? (
+            <>
+              <span className="flex items-start text-5xl font-bold" style={{ color }}>
+                {noteLetter}
+                <span className="mt-1 text-lg font-semibold text-muted">{noteOctave}</span>
+              </span>
+              <span className="text-xs font-semibold tabular-nums" style={{ color }}>
+                {reading!.cents > 0 ? "+" : ""}
+                {reading!.cents.toFixed(1)} cents
+              </span>
+              <span className="text-[0.7rem] tabular-nums text-muted">
+                {reading!.freq.toFixed(1)} Hz
+              </span>
+            </>
+          ) : playing ? (
+            <>
+              <span className="text-4xl font-bold text-accent">
+                {midiToNote(playing.midi + transpose).replace(/\d+$/, "")}
+              </span>
+              <span className="text-xs tabular-nums text-muted">
+                {freqOfMidi(playing.midi, refA).toFixed(1)} Hz
+              </span>
+            </>
+          ) : (
+            <span className="px-2 text-xs text-muted">
+              {listening ? "Play a note…" : "Press Start to listen, or tap a note to hear it"}
+            </span>
+          )}
+        </div>
+
+        <div className="pointer-events-auto flex flex-col items-center">
+          <span className="text-[0.65rem] font-medium uppercase tracking-wider text-muted">
+            Octave
+          </span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => updateSettings({ octave: Math.max(MIN_OCTAVE, octave - 1) })}
+              disabled={octave <= MIN_OCTAVE}
+              aria-label="Octave down"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-surface text-lg leading-none hover:bg-surface-hover"
+            >
+              −
+            </button>
+            <span className="w-4 text-xl font-semibold tabular-nums">{octave}</span>
+            <button
+              type="button"
+              onClick={() => updateSettings({ octave: Math.min(MAX_OCTAVE, octave + 1) })}
+              disabled={octave >= MAX_OCTAVE}
+              aria-label="Octave up"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-surface text-lg leading-none hover:bg-surface-hover"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      </TunerDial>
+
+      <div className="flex w-full flex-col items-center gap-2" aria-live="polite">
+        <div
+          className="relative h-2 w-full rounded-full bg-surface"
+          role="meter"
+          aria-label="Tuning offset in cents"
+          aria-valuemin={-50}
+          aria-valuemax={50}
+          aria-valuenow={Math.round(cents)}
+        >
+          <div className="absolute left-1/2 top-[-3px] h-[14px] w-px bg-muted/60" />
+          {reading && (
+            <div
+              className="absolute top-1/2 h-4 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full transition-[left,background-color] duration-100"
+              style={{ left: `${50 + cents}%`, background: color }}
+            />
+          )}
+        </div>
+        <div className="flex w-full justify-between text-[0.7rem] text-muted">
+          <span>♭ flat</span>
+          <span className="font-semibold" style={{ color: reading ? color : undefined }}>
+            {verdict}
+          </span>
+          <span>sharp ♯</span>
+        </div>
+      </div>
+
+      {tuning.strings.length > 0 && (
+        <div className="flex w-full flex-col gap-2">
+          <p className="text-xs font-medium text-muted">Tap a string to hear its pitch</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {tuning.strings.map((s, i) => {
+              const midi = stringMidis[i];
+              const isHeard = reading?.target === midi;
+              const isPlaying = playing?.midi === midi;
+              return (
+                <button
+                  key={`${s}-${i}`}
+                  type="button"
+                  onClick={() => playMidi(midi)}
+                  aria-pressed={isPlaying}
+                  className={`min-w-14 rounded-xl px-3 py-2 text-sm font-semibold tabular-nums transition-colors ${
+                    isPlaying
+                      ? "bg-accent text-accent-foreground"
+                      : "bg-surface hover:bg-surface-hover"
+                  }`}
+                  style={
+                    isHeard && !isPlaying
+                      ? { background: color, color: "var(--background)" }
+                      : undefined
+                  }
+                >
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-sm text-danger">{error}</p>}
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={listening ? stopListening : () => void startListening()}
+          className={`rounded-full px-8 py-3 text-base font-semibold transition-colors ${
+            listening
+              ? "bg-surface hover:bg-surface-hover"
+              : "bg-accent text-accent-foreground hover:bg-accent-hover"
+          }`}
+        >
+          {listening ? "Stop" : "Start listening"}
+        </button>
+        {playing && (
+          <button
+            type="button"
+            onClick={stopTone}
+            className="rounded-full bg-surface px-5 py-3 text-base font-semibold hover:bg-surface-hover"
+          >
+            Stop tone
+          </button>
+        )}
+      </div>
+      <KeyHint>
+        Press <KeyHint.Key>Space</KeyHint.Key> to start or stop listening
+      </KeyHint>
+    </ToolLayout>
+  );
+}

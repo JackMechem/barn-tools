@@ -1,0 +1,141 @@
+"use client";
+
+const NOTES = [
+  { pc: 0, main: "C", alt: null },
+  { pc: 1, main: "C#", alt: "Db" },
+  { pc: 2, main: "D", alt: null },
+  { pc: 3, main: "D#", alt: "Eb" },
+  { pc: 4, main: "E", alt: null },
+  { pc: 5, main: "F", alt: null },
+  { pc: 6, main: "F#", alt: "Gb" },
+  { pc: 7, main: "G", alt: null },
+  { pc: 8, main: "G#", alt: "Ab" },
+  { pc: 9, main: "A", alt: null },
+  { pc: 10, main: "A#", alt: "Bb" },
+  { pc: 11, main: "B", alt: null },
+];
+
+const SIZE = 400;
+const CENTER = SIZE / 2;
+const OUTER = 194;
+const INNER = 128;
+const MID = (OUTER + INNER) / 2;
+const GAP_DEGREES = 1.6;
+
+function polar(radius: number, degrees: number): [number, number] {
+  const radians = ((degrees - 90) * Math.PI) / 180;
+  // Rounded so the server and browser (whose trig can differ in the last digits) render identical markup.
+  const round = (n: number) => Math.round(n * 100) / 100;
+  return [round(CENTER + radius * Math.cos(radians)), round(CENTER + radius * Math.sin(radians))];
+}
+
+function segmentPath(centerDegrees: number) {
+  const start = centerDegrees - 15 + GAP_DEGREES;
+  const end = centerDegrees + 15 - GAP_DEGREES;
+  const [ox1, oy1] = polar(OUTER, start);
+  const [ox2, oy2] = polar(OUTER, end);
+  const [ix1, iy1] = polar(INNER, start);
+  const [ix2, iy2] = polar(INNER, end);
+  return `M ${ox1} ${oy1} A ${OUTER} ${OUTER} 0 0 1 ${ox2} ${oy2} L ${ix2} ${iy2} A ${INNER} ${INNER} 0 0 0 ${ix1} ${iy1} Z`;
+}
+
+/** A ring of the 12 notes (C at the top) with the tuner readout in the middle. */
+export default function TunerDial({
+  detectedPc,
+  detectedColor,
+  playingPc,
+  onSelect,
+  children,
+}: {
+  /** Pitch class currently heard, lit up on the ring. */
+  detectedPc: number | null;
+  detectedColor: string;
+  /** Pitch class of the tone being played, outlined on the ring. */
+  playingPc: number | null;
+  onSelect: (pc: number) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative mx-auto aspect-square w-full max-w-[380px]">
+      <svg
+        viewBox={`0 0 ${SIZE} ${SIZE}`}
+        className="h-full w-full"
+        role="group"
+        aria-label="Notes"
+      >
+        {NOTES.map(({ pc, main, alt }) => {
+          const degrees = pc * 30;
+          const [tx, ty] = polar(MID, degrees);
+          const isDetected = detectedPc === pc;
+          const isPlaying = playingPc === pc;
+          return (
+            <g
+              key={pc}
+              role="button"
+              tabIndex={0}
+              aria-label={`Play ${alt ? `${main} / ${alt}` : main}`}
+              aria-pressed={isPlaying}
+              onClick={() => onSelect(pc)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onSelect(pc);
+                }
+              }}
+              className="group cursor-pointer outline-none"
+            >
+              <path
+                d={segmentPath(degrees)}
+                className={`transition-colors ${
+                  isDetected
+                    ? ""
+                    : alt
+                      ? "fill-surface-hover group-hover:fill-muted/30"
+                      : "fill-surface group-hover:fill-surface-hover"
+                }`}
+                style={{
+                  ...(isDetected ? { fill: detectedColor } : {}),
+                  stroke: isPlaying ? "var(--accent)" : "transparent",
+                  strokeWidth: 4,
+                }}
+              />
+              <path
+                d={segmentPath(degrees)}
+                className="fill-none stroke-accent opacity-0 group-focus-visible:opacity-100"
+                strokeWidth={3}
+              />
+              <text
+                x={tx}
+                y={alt ? ty - 4 : ty}
+                textAnchor="middle"
+                dominantBaseline="central"
+                className={`select-none text-[26px] font-semibold ${
+                  isDetected ? "fill-background" : "fill-foreground"
+                }`}
+              >
+                {main}
+              </text>
+              {alt && (
+                <text
+                  x={tx}
+                  y={ty + 18}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  className={`select-none text-[15px] ${
+                    isDetected ? "fill-background" : "fill-muted"
+                  }`}
+                >
+                  {alt}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+
+      <div className="pointer-events-none absolute left-1/2 top-1/2 flex aspect-square w-[58%] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-between rounded-full py-[9%] text-center">
+        {children}
+      </div>
+    </div>
+  );
+}

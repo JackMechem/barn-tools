@@ -67,3 +67,8 @@ export function randomNoteInRange(range: ParsedRange): string {
   const midi = range.lowMidi + Math.floor(Math.random() * span);
   return midiToNote(midi);
 }
+
+export function noteToFrequency(note: string): number | null {
+  const midi = parseNote(note);
+  return midi === null ? null : 440 * 2 ** ((midi - 69) / 12);
+}

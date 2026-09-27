@@ -1,0 +1,138 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { SearchIcon, filterLinks, svgProps } from "@/components/tools";
+
+export const OPEN_PALETTE_EVENT = "open-command-palette";
+
+function EnterIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M5 12h14M13 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+function Palette({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const results = filterLinks(query);
+  const activeIndex = Math.min(active, Math.max(0, results.length - 1));
+
+  useEffect(() => {
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  function go(index: number) {
+    const target = results[index];
+    if (!target) return;
+    router.push(target.href);
+    onClose();
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive(Math.min(results.length - 1, activeIndex + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive(Math.max(0, activeIndex - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      go(activeIndex);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay px-4 pt-[18vh]"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-label="Search tools"
+        className="w-full max-w-3xl overflow-hidden rounded-2xl bg-surface text-foreground shadow-2xl shadow-black/30 ring-1 ring-foreground/10"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={onKeyDown}
+      >
+        <div className="flex items-center gap-4 border-b border-surface-hover px-6 py-5">
+          <SearchIcon className="h-5 w-5 shrink-0 text-muted" />
+          <input
+            autoFocus
+            type="text"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setActive(0);
+            }}
+            placeholder="Search..."
+            aria-label="Search tools"
+            className="min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-muted"
+          />
+        </div>
+
+        <ul ref={listRef} role="listbox" className="max-h-80 overflow-y-auto p-2">
+          {results.length === 0 && <li className="px-4 py-3 text-muted">No tools found</li>}
+          {results.map(({ href, label, icon: Icon }, i) => (
+            <li
+              key={href}
+              role="option"
+              aria-selected={i === activeIndex}
+              data-index={i}
+              onPointerMove={() => setActive(i)}
+              onClick={() => go(i)}
+              className={`flex cursor-pointer items-center gap-4 rounded-xl px-4 py-3 ${
+                i === activeIndex ? "bg-surface-hover" : ""
+              }`}
+            >
+              <Icon className="h-5 w-5 shrink-0 text-muted" />
+              <span className="flex-1 truncate">{label}</span>
+              {i === activeIndex && (
+                <span className="flex items-center gap-2 text-sm text-muted">
+                  Open
+                  <span className="flex h-6 w-6 items-center justify-center rounded bg-foreground/20 text-foreground">
+                    <EnterIcon className="h-4 w-4" />
+                  </span>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+export default function CommandPalette() {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!window.matchMedia("(min-width: 1024px)").matches) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("input, textarea, select, [contenteditable='true']")) return;
+      e.preventDefault();
+      setOpen(true);
+    }
+    // The sidebar's search box opens the same menu.
+    const onOpenRequest = () => setOpen(true);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener(OPEN_PALETTE_EVENT, onOpenRequest);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener(OPEN_PALETTE_EVENT, onOpenRequest);
+    };
+  }, []);
+
+  return open ? <Palette onClose={() => setOpen(false)} /> : null;
+}

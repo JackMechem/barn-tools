@@ -1,23 +1,14 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
-import { Geist, Geist_Mono } from "next/font/google";
+import { FONT_VARIABLE_CLASSES } from "@/app/fonts";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
-import AppHeader from "@/components/AppHeader";
+import CommandPalette from "@/components/CommandPalette";
+import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "Jam Practice",
-  description: "Track jazz tunes with tempos and keys, and pick one to practice at random.",
+  title: "Barn Tools",
+  description: "Practice tools for musicians: a jam tune picker, a note trainer, and more.",
 };
 
 export const viewport: Viewport = {
@@ -31,17 +22,20 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${FONT_VARIABLE_CLASSES} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+      <body className="flex h-dvh overflow-hidden bg-surface" suppressHydrationWarning>
         <Script
           id="theme-init"
           strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
         />
-        <AppHeader />
-        {children}
+        <Sidebar />
+        <CommandPalette />
+        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-xl lg:border lg:border-surface-hover">
+          {children}
+        </div>
       </body>
     </html>
   );

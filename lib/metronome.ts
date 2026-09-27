@@ -1,11 +1,10 @@
 let audioCtx: AudioContext | null = null;
 
-function getAudioContext(): AudioContext {
+export function getAudioContext(): AudioContext {
   if (!audioCtx) {
     const Ctor =
       window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     audioCtx = new Ctor();
   }
   return audioCtx;
@@ -42,7 +41,8 @@ export function playCountOff(
   timeSignature: string,
   bars = 8,
   accentFirstBeat = false,
-  continueIndefinitely = false
+  continueIndefinitely = false,
+  onBeat?: (beat: number) => void,
 ): CountOff {
   const ctx = getAudioContext();
   if (ctx.state === "suspended") void ctx.resume();
@@ -53,8 +53,19 @@ export function playCountOff(
   const startTime = ctx.currentTime + 0.05;
 
   const oscillators: OscillatorNode[] = [];
+  const timeouts = new Set<ReturnType<typeof setTimeout>>();
   function scheduleBeat(i: number) {
     const time = startTime + i * beatDuration;
+    if (onBeat) {
+      const t = setTimeout(
+        () => {
+          timeouts.delete(t);
+          onBeat(i % beatsPerBar);
+        },
+        Math.max(0, (time - ctx.currentTime) * 1000),
+      );
+      timeouts.add(t);
+    }
     const accent = accentFirstBeat && i % beatsPerBar === 0;
     oscillators.push(scheduleClick(ctx, time, accent));
   }
@@ -79,6 +90,8 @@ export function playCountOff(
     durationMs: continueIndefinitely ? Infinity : durationMs,
     stop: () => {
       if (intervalId) clearInterval(intervalId);
+      for (const t of timeouts) clearTimeout(t);
+      timeouts.clear();
       for (const osc of oscillators) {
         try {
           osc.stop();

@@ -1,8 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import TuneManagerModal from "./TuneManagerModal";
-import { CountOff, playCountOff } from "@/lib/metronome";
+import BeatIndicator from "@/components/BeatIndicator";
+import ToolLayout from "@/components/ToolLayout";
+import KeyHint from "@/components/KeyHint";
+import PanelsToggle from "@/components/PanelsToggle";
+import CollapsiblePanel from "@/components/CollapsiblePanel";
+import Select from "@/components/Select";
+import SwitchRow from "@/components/SwitchRow";
+import TunesPanel from "@/components/TunesPanel";
+import { StopwatchIcon } from "@/components/tools";
+import { STANDARDS, standardToTune } from "@/lib/standards";
+import { CountOff, parseBeatsPerBar, playCountOff } from "@/lib/metronome";
+import type { BeatLevel } from "@/lib/clickEngine";
+import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSpaceToggle } from "@/lib/useSpaceToggle";
 import { getServerSnapshot, getSnapshot, setTunes, subscribe } from "@/lib/tunesStore";
 import { Key, Tempo, Tune } from "@/lib/types";
 
@@ -12,15 +24,28 @@ type PickResult = {
   key: Key | null;
 };
 
+const BAR_OPTIONS = [1, 2, 4, 8, 16].map((n) => ({ value: n, label: String(n) }));
+const PANEL_IDS = ["jam-tunes", "jam-countoff"];
+const SETTINGS_KEY = "jam-practice-settings-v2";
+const DEFAULT_SETTINGS = {
+  countOffBars: 8,
+  accentFirstBeat: true,
+  keepGoingIndefinitely: true,
+  pickFromStandards: false,
+};
+
 export default function JamPractice() {
   const tunes = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const [pick, setPick] = useState<PickResult | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
   const [isCounting, setIsCounting] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [countOffBars, setCountOffBars] = useState(8);
-  const [accentFirstBeat, setAccentFirstBeat] = useState(false);
-  const [keepGoingIndefinitely, setKeepGoingIndefinitely] = useState(false);
+  const [currentBeat, setCurrentBeat] = useState<number | null>(null);
+  const [settings, updateSettings] = usePersistedSettings(SETTINGS_KEY, DEFAULT_SETTINGS);
+  const { countOffBars, accentFirstBeat, keepGoingIndefinitely, pickFromStandards } = settings;
+  const setCountOffBars = (countOffBars: number) => updateSettings({ countOffBars });
+  const setAccentFirstBeat = (accentFirstBeat: boolean) => updateSettings({ accentFirstBeat });
+  const setKeepGoingIndefinitely = (keepGoingIndefinitely: boolean) =>
+    updateSettings({ keepGoingIndefinitely });
 
   const countOffRef = useRef<CountOff | null>(null);
   const countOffTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,18 +65,25 @@ export default function JamPractice() {
       countOffTimeoutRef.current = null;
     }
     setIsCounting(false);
+    setCurrentBeat(null);
   }
 
   function pickRandom() {
-    if (isModalOpen) return;
     stopCountOff();
 
-    if (tunes.length === 0) {
-      setPickError("Add at least one tune to get started.");
+    if (!pickFromStandards && tunes.length === 0) {
+      setPickError("Add at least one tune to get started, or turn on all jazz standards.");
       setPick(null);
       return;
     }
-    const tune = tunes[Math.floor(Math.random() * tunes.length)];
+    let tune: Tune;
+    if (pickFromStandards) {
+      // Any of the built-in standards, whether or not they're in your list.
+      const standard = STANDARDS[Math.floor(Math.random() * STANDARDS.length)];
+      tune = { ...standardToTune(standard), notes: standard.composer };
+    } else {
+      tune = tunes[Math.floor(Math.random() * tunes.length)];
+    }
     const enabledTempos = tune.tempos.filter((t) => t.enabled);
     const enabledKeys = tune.keys.filter((k) => k.enabled);
     const tempo =
@@ -59,9 +91,7 @@ export default function JamPractice() {
         ? enabledTempos[Math.floor(Math.random() * enabledTempos.length)]
         : null;
     const key =
-      enabledKeys.length > 0
-        ? enabledKeys[Math.floor(Math.random() * enabledKeys.length)]
-        : null;
+      enabledKeys.length > 0 ? enabledKeys[Math.floor(Math.random() * enabledKeys.length)] : null;
     setPick({ tune, tempo, key });
     setPickError(null);
 
@@ -71,7 +101,8 @@ export default function JamPractice() {
         tune.timeSignature,
         countOffBars,
         accentFirstBeat,
-        keepGoingIndefinitely
+        keepGoingIndefinitely,
+        setCurrentBeat,
       );
       countOffRef.current = countOff;
       setIsCounting(true);
@@ -93,94 +124,143 @@ export default function JamPractice() {
     }
   }
 
-  return (
-    <div
-      className="relative flex min-h-dvh cursor-pointer touch-manipulation select-none flex-col bg-background text-foreground [-webkit-tap-highlight-color:transparent]"
-      onClick={pickRandom}
-    >
-      <div
-        className="flex justify-end px-4 pt-[calc(env(safe-area-inset-top)+4rem)] sm:px-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={() => setIsModalOpen(true)}
-          className="rounded-full bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-        >
-          Tunes
-        </button>
-      </div>
+  useSpaceToggle(pickRandom);
 
-      <main className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-8 text-center sm:px-6">
-        {tunes.length === 0 && !pickError ? (
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-2xl font-semibold">No tunes yet</p>
-            <p className="text-muted">
-              Open Tunes to add your first one, then click anywhere to pick.
-            </p>
-          </div>
-        ) : pick ? (
-          <div className="flex flex-col items-center gap-3">
-            <p className="text-sm font-medium uppercase tracking-widest text-muted">
-              Now practicing
-            </p>
-            <h1 className="break-words text-4xl font-bold sm:text-5xl">
-              {pick.tune.name}
-            </h1>
-            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-base text-muted sm:gap-x-6 sm:text-lg">
-              <span>
-                {pick.tempo ? `${pick.tempo.value} BPM` : "no enabled tempo"}
-              </span>
-              <span>{pick.key ? pick.key.value : "no enabled key"}</span>
-              <span>{pick.tune.timeSignature}</span>
-            </div>
-            {pick.tune.notes && (
-              <p className="max-w-md whitespace-pre-wrap text-sm text-muted">
-                {pick.tune.notes}
-              </p>
-            )}
-            {isCounting && (
-              <div
-                className="mt-4 flex flex-wrap cursor-default items-center justify-center gap-3"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <span className="text-sm font-medium text-accent">
-                  {keepGoingIndefinitely
-                    ? "Metronome running…"
-                    : `Counting off ${countOffBars} bar${countOffBars === 1 ? "" : "s"}…`}
-                </span>
-                <button
-                  type="button"
-                  onClick={stopCountOff}
-                  className="rounded-full bg-surface px-4 py-2 text-sm hover:bg-surface-hover"
-                >
-                  Stop
-                </button>
-              </div>
-            )}
-            <p className="mt-6 text-sm text-muted">Click anywhere to pick again</p>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-2xl font-semibold">Click anywhere</p>
-            <p className="text-muted">to pick a random tune</p>
+  const stopRef = useRef(stopCountOff);
+  useEffect(() => {
+    stopRef.current = stopCountOff;
+  });
+  useEffect(() => {
+    if (!isCounting) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      // Dialogs and open menus use Escape to close themselves first.
+      if (
+        document.querySelector(
+          "[role='dialog'], [role='alertdialog'], [role='combobox'][aria-expanded='true']",
+        )
+      ) {
+        return;
+      }
+      stopRef.current();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isCounting]);
+
+  function handleClearTunes() {
+    setTunes([]);
+    setPick(null);
+    stopCountOff();
+  }
+
+  return (
+    <ToolLayout
+      title="Jam Practice"
+      options={
+        <>
+          <PanelsToggle ids={PANEL_IDS} />
+          <TunesPanel
+            onDeleteTune={handleDeleteTune}
+            onClearAll={handleClearTunes}
+            pickFromStandards={pickFromStandards}
+            onPickFromStandardsChange={(checked) => updateSettings({ pickFromStandards: checked })}
+          />
+
+          <CollapsiblePanel id="jam-countoff" title="Count-off" icon={StopwatchIcon}>
+            <label className="flex items-center justify-between gap-3 text-sm">
+              <span className="font-medium text-muted">Count-off bars</span>
+              <Select
+                value={countOffBars}
+                onChange={setCountOffBars}
+                options={BAR_OPTIONS}
+                className="min-w-20"
+              />
+            </label>
+            <SwitchRow label="Accent" checked={accentFirstBeat} onChange={setAccentFirstBeat} />
+            <SwitchRow
+              label="Keep metronome going"
+              checked={keepGoingIndefinitely}
+              onChange={setKeepGoingIndefinitely}
+            />
+          </CollapsiblePanel>
+        </>
+      }
+    >
+      <div className="flex flex-col items-center gap-3">
+        {pick && (
+          <p className="text-sm font-medium uppercase tracking-widest text-muted">Now practicing</p>
+        )}
+        <h1 className="break-words text-4xl font-bold sm:text-5xl">
+          {pick ? pick.tune.name : "—"}
+        </h1>
+        {pick && (
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-base text-muted sm:gap-x-6 sm:text-lg">
+            <span>{pick.tempo ? `${pick.tempo.value} BPM` : "no enabled tempo"}</span>
+            <span>{pick.key ? pick.key.value : "no enabled key"}</span>
+            <span>{pick.tune.timeSignature}</span>
           </div>
         )}
-        {pickError && <p className="text-sm text-danger">{pickError}</p>}
-      </main>
+        {pick?.tune.notes && (
+          <p className="max-w-md whitespace-pre-wrap text-sm text-muted">{pick.tune.notes}</p>
+        )}
+        {!pick && tunes.length === 0 && !pickFromStandards && !pickError && (
+          <p className="text-muted">Add some tunes below, then pick one at random.</p>
+        )}
+        {isCounting && pick?.tempo && (
+          <div className="mt-4 flex flex-col items-center gap-4">
+            <div className="flex flex-col items-center">
+              <span className="text-6xl font-bold tabular-nums sm:text-7xl">
+                {pick.tempo.value}
+              </span>
+              <span className="text-sm font-medium text-muted">
+                BPM · {pick.tune.timeSignature}
+              </span>
+            </div>
+            <BeatIndicator
+              accents={Array.from(
+                { length: parseBeatsPerBar(pick.tune.timeSignature) },
+                (_, i): BeatLevel => (accentFirstBeat && i === 0 ? 2 : 1),
+              )}
+              currentBeat={currentBeat}
+            />
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <span className="text-sm font-medium text-accent">
+                {keepGoingIndefinitely
+                  ? "Metronome running…"
+                  : `Counting off ${countOffBars} bar${countOffBars === 1 ? "" : "s"}…`}
+              </span>
+              <button
+                type="button"
+                onClick={stopCountOff}
+                className="rounded-full bg-surface px-4 py-2 text-sm hover:bg-surface-hover"
+              >
+                Stop
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
-      {isModalOpen && (
-        <TuneManagerModal
-          onClose={() => setIsModalOpen(false)}
-          onDeleteTune={handleDeleteTune}
-          countOffBars={countOffBars}
-          setCountOffBars={setCountOffBars}
-          accentFirstBeat={accentFirstBeat}
-          setAccentFirstBeat={setAccentFirstBeat}
-          keepGoingIndefinitely={keepGoingIndefinitely}
-          setKeepGoingIndefinitely={setKeepGoingIndefinitely}
-        />
-      )}
-    </div>
+      {pickError && <p className="text-sm text-danger">{pickError}</p>}
+
+      <p className="-mb-3 text-sm text-muted">
+        {pickFromStandards
+          ? `Random picks come from all ${STANDARDS.length} built-in standards, not just your list.`
+          : "Random picks come from the tunes in your list."}
+      </p>
+
+      <button
+        type="button"
+        onClick={pickRandom}
+        className="rounded-full bg-accent px-8 py-3 text-base font-semibold text-accent-foreground transition-colors hover:bg-accent-hover"
+      >
+        {pick ? "Pick another" : "Pick a tune"}
+      </button>
+      <KeyHint>
+        Press <KeyHint.Key>Space</KeyHint.Key> to pick a tune · <KeyHint.Key>Esc</KeyHint.Key> to
+        stop
+      </KeyHint>
+    </ToolLayout>
   );
 }

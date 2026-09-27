@@ -1,5 +1,5 @@
-import JamPractice from "@/components/JamPractice";
+import Home from "@/components/Home";
 
-export default function Home() {
-  return <JamPractice />;
+export default function HomePage() {
+  return <Home />;
 }
