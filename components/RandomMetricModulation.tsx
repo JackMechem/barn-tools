@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import BeatIndicator from "@/components/BeatIndicator";
 import PanelsToggle from "@/components/PanelsToggle";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
+import Hint from "@/components/Hint";
 import Select from "@/components/Select";
 import SwitchRow from "@/components/SwitchRow";
 import {
@@ -394,6 +395,7 @@ export default function RandomMetricModulation() {
   return (
     <ToolLayout
       title="Polyrhythm Metric Modulation Metronome"
+      credit="Idea by Rob Moreno"
       sidePanelLabel="Modulations"
       sidePanel={
         log.length > 0 && (
@@ -471,6 +473,11 @@ export default function RandomMetricModulation() {
               disabled={running}
               layout="row"
               onChange={setMinBarsPerModulation}
+              hint={
+                matchToRealignment
+                  ? "The interval is stretched to at least this many bars if realigning takes longer."
+                  : "How many bars play at a tempo before it jumps to the next."
+              }
             />
 
             <SwitchRow
@@ -478,6 +485,7 @@ export default function RandomMetricModulation() {
               checked={matchToRealignment}
               onChange={setMatchToRealignment}
               disabled={running}
+              hint="Extends each interval to however many bars it takes the new tempo to land back on a downbeat with the reference tempo."
             />
 
             <SwitchRow
@@ -485,6 +493,7 @@ export default function RandomMetricModulation() {
               checked={returnToOriginal}
               onChange={setReturnToOriginal}
               disabled={running}
+              hint="Alternates modulating away from and back to the tempo you started at, instead of drifting freely to a new one each time."
             />
 
             <SwitchRow
@@ -492,12 +501,14 @@ export default function RandomMetricModulation() {
               checked={avoidRepeat}
               onChange={setAvoidRepeat}
               disabled={running}
+              hint="Won't pick the same ratio twice in a row."
             />
 
             <div className="flex flex-col gap-2 text-sm">
               <span className="font-medium text-muted">
                 Polyrhythms in the mix
               </span>
+              <Hint>Which ratios can be picked for a modulation.</Hint>
               <div className="flex flex-wrap gap-2">
                 {MODULATIONS.map((m) => {
                   const on = enabledRatios.includes(m.id);
@@ -547,12 +558,16 @@ export default function RandomMetricModulation() {
                 options={SOUND_OPTIONS}
               />
             </label>
+            <Hint>
+              A different click sound than the main one, so the two are easy to tell apart.
+            </Hint>
 
             <SwitchRow
               label="Mute"
               checked={referenceMuted}
               onChange={setReferenceMuted}
               disabled={!playOriginalTempo}
+              hint="Keeps this second click running silently, still shown and counted, just not heard."
             />
           </CollapsiblePanel>
 

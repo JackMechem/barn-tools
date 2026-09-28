@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import Hint from "@/components/Hint";
 
 export default function SwitchRow({
   label,
@@ -40,7 +41,7 @@ export default function SwitchRow({
           />
         </button>
       </div>
-      {hint && <span className="text-xs text-muted">{hint}</span>}
+      {hint && <Hint>{hint}</Hint>}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import ContextMenu, { MenuItem, MenuState } from "@/components/ContextMenu";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import Hint from "@/components/Hint";
 import Select from "@/components/Select";
 import { OptionSection, OptionsCard } from "@/components/OptionsCard";
 import KeyHint from "@/components/KeyHint";
@@ -413,6 +414,7 @@ export default function SlowDowner() {
                 className="slider h-6 w-full cursor-pointer"
               />
             </label>
+            <Hint>How fast the file plays back, as a percentage of its original speed.</Hint>
             <div className="flex flex-wrap gap-2">
               {SPEED_PRESETS.map((preset) => (
                 <button
@@ -434,6 +436,7 @@ export default function SlowDowner() {
               label="Keep original pitch"
               checked={preservePitch}
               onChange={(checked) => updateSettings({ preservePitch: checked })}
+              hint="Corrects the pitch so slowing down doesn't also drop it (or speeding up raise it)."
             />
             <label className="flex flex-col gap-2 text-sm">
               <span className="flex items-center justify-between font-medium text-muted">
@@ -451,6 +454,7 @@ export default function SlowDowner() {
                 className="slider h-6 w-full cursor-pointer"
               />
             </label>
+            <Hint>Playback volume for this file.</Hint>
           </OptionSection>
 
           <OptionSection title="Markers" icon={FlagIcon}>

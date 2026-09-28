@@ -6,7 +6,7 @@ import {
   writeSettings,
 } from "@/lib/usePersistedSettings";
 
-export const PANEL_DEFAULTS = { open: true };
+export const PANEL_DEFAULTS = { open: true, showHints: false };
 
 export function panelKey(id: string) {
   return `jam-practice-panel-${id}`;

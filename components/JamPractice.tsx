@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import BeatIndicator from "@/components/BeatIndicator";
+import Hint from "@/components/Hint";
 import ToolLayout from "@/components/ToolLayout";
 import KeyHint from "@/components/KeyHint";
 import PanelsToggle from "@/components/PanelsToggle";
@@ -157,6 +158,7 @@ export default function JamPractice() {
   return (
     <ToolLayout
       title="Jam Practice"
+      credit="Idea by Rob Moreno"
       options={
         <>
           <PanelsToggle ids={PANEL_IDS} />
@@ -177,11 +179,21 @@ export default function JamPractice() {
                 className="min-w-20"
               />
             </label>
-            <SwitchRow label="Accent" checked={accentFirstBeat} onChange={setAccentFirstBeat} />
+            <Hint>
+              How many bars click before the tune starts (or, with Keep metronome going on,
+              before it hands off to the running metronome).
+            </Hint>
+            <SwitchRow
+              label="Accent"
+              checked={accentFirstBeat}
+              onChange={setAccentFirstBeat}
+              hint="Plays beat 1 of every bar louder and higher-pitched, so you can hear where the bar starts."
+            />
             <SwitchRow
               label="Keep metronome going"
               checked={keepGoingIndefinitely}
               onChange={setKeepGoingIndefinitely}
+              hint="Keeps clicking at the tune's tempo after the count-off, instead of stopping once it ends."
             />
           </CollapsiblePanel>
         </>

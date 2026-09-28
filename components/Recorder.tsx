@@ -6,6 +6,7 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import PromptDialog from "@/components/PromptDialog";
 import ContextMenu, { MenuItem, MenuState } from "@/components/ContextMenu";
 import HelpButton, { HelpGroup } from "@/components/HelpButton";
+import Hint from "@/components/Hint";
 import KeyHint from "@/components/KeyHint";
 import NumberField from "@/components/NumberField";
 import Select from "@/components/Select";
@@ -1776,6 +1777,7 @@ export default function Recorder() {
               label="Click while playing and recording"
               checked={metronomeOn}
               onChange={(checked) => updateSettings({ metronomeOn: checked })}
+              hint="Plays an audible click at the project tempo during playback and recording."
             />
             <div className="grid grid-cols-2 gap-4">
               <label className="flex flex-col gap-1 text-sm">
@@ -1799,10 +1801,12 @@ export default function Recorder() {
                 />
               </label>
             </div>
+            <Hint>Sets the project&apos;s tempo and time signature, used by the click, beat lines and count-in.</Hint>
             <SwitchRow
               label="Show beat lines"
               checked={showGrid}
               onChange={(checked) => updateSettings({ showGrid: checked })}
+              hint="Draws vertical lines on the waveform at each beat, at the project tempo."
             />
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-muted">Snap playhead and edits to</span>
@@ -1812,6 +1816,7 @@ export default function Recorder() {
                 options={SNAP_OPTIONS}
               />
             </label>
+            <Hint>Pulls the playhead, loop edges and clip edits to the nearest beat line as you drag.</Hint>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-muted">Count-in before recording</span>
               <Select
@@ -1820,6 +1825,7 @@ export default function Recorder() {
                 options={COUNT_IN_OPTIONS}
               />
             </label>
+            <Hint>How many bars click before recording actually starts.</Hint>
             <label className="flex flex-col gap-2 text-sm">
               <span className="flex items-center justify-between font-medium text-muted">
                 Click volume
@@ -1838,11 +1844,11 @@ export default function Recorder() {
                 className="slider h-6 w-full cursor-pointer"
               />
             </label>
-            <p className="text-xs text-muted">
+            <Hint>
               The tempo sets the beat lines even with the click off. Drag the accent handle at the
               end of a clip to repeat it, or use the repeat button on a track. The click plays
               through your speakers, so wear headphones or it will be picked up by the microphone.
-            </p>
+            </Hint>
           </OptionSection>
 
           <OptionSection title="Input" icon={MicIcon}>
@@ -1858,6 +1864,7 @@ export default function Recorder() {
                 ]}
               />
             </label>
+            <Hint>Which microphone or audio interface to record from.</Hint>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-muted">Channels</span>
               <Select
@@ -1867,6 +1874,7 @@ export default function Recorder() {
                 options={CHANNEL_MODES}
               />
             </label>
+            <Hint>Whether to record input 1, input 2, both mixed to mono, or both kept as stereo.</Hint>
             <button
               type="button"
               onClick={() => void toggleMonitoring()}
@@ -1879,20 +1887,21 @@ export default function Recorder() {
             >
               {monitoring ? "Stop checking level" : "Check input level"}
             </button>
-            <p className="text-xs text-muted">
+            <Hint>
               Takes are lined up with the click automatically. A short marker is added to the very
               end of each recording to measure the delay, and it&apos;s trimmed off afterwards.
-            </p>
+            </Hint>
             <SwitchRow
               label="Play other tracks while recording"
               checked={overdub}
               onChange={(checked) => updateSettings({ overdub: checked })}
               disabled={recording}
+              hint="Lets you play along with what's already recorded instead of recording in silence."
             />
-            <p className="text-xs text-muted">
+            <Hint>
               An interface with two inputs records input 1 on the left and input 2 on the right, so
               pick the input your instrument is plugged into.
-            </p>
+            </Hint>
           </OptionSection>
 
           <OptionSection title="Project" icon={SlidersIcon}>
@@ -1906,6 +1915,7 @@ export default function Recorder() {
                 className="rounded-lg bg-background px-3 py-2 outline-none focus:ring-2 focus:ring-accent"
               />
             </label>
+            <Hint>Used for the exported WAV file&apos;s name.</Hint>
             <label className="flex flex-col gap-2 text-sm">
               <span className="flex items-center justify-between font-medium text-muted">
                 Track height
@@ -1922,6 +1932,7 @@ export default function Recorder() {
                 className="slider h-6 w-full cursor-pointer"
               />
             </label>
+            <Hint>How tall each track&apos;s waveform is drawn.</Hint>
             <label className="flex flex-col gap-2 text-sm">
               <span className="flex items-center justify-between font-medium text-muted">
                 Master volume
@@ -1938,6 +1949,7 @@ export default function Recorder() {
                 className="slider h-6 w-full cursor-pointer"
               />
             </label>
+            <Hint>Overall playback volume for the whole mix, not included in the export.</Hint>
           </OptionSection>
 
           <OptionSection title="Export" icon={DownloadIcon}>
@@ -1959,10 +1971,14 @@ export default function Recorder() {
                 Download selected loop (WAV)
               </button>
             </div>
-            <p className="text-xs text-muted">
-              {busy ??
-                "The mixdown includes every track that's audible right now, with its level, mute and solo. Use the download button on a track to export just that one."}
-            </p>
+            {busy ? (
+              <p className="text-xs text-muted">{busy}</p>
+            ) : (
+              <Hint>
+                The mixdown includes every track that&apos;s audible right now, with its level,
+                mute and solo. Use the download button on a track to export just that one.
+              </Hint>
+            )}
           </OptionSection>
 
           <OptionSection title="Markers" icon={FlagIcon}>

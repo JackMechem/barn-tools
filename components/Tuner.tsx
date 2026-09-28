@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
+import Hint from "@/components/Hint";
 import ToolLayout from "@/components/ToolLayout";
 import { InstrumentIcon } from "@/components/InstrumentIcons";
 import KeyHint from "@/components/KeyHint";
@@ -273,6 +274,7 @@ export default function Tuner() {
                 }))}
               />
             </label>
+            <Hint>Sets which strings the dial and the tap-to-hear buttons below are built from.</Hint>
             {instrument.tunings.length > 1 && (
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-muted">Tuning</span>
@@ -282,6 +284,9 @@ export default function Tuner() {
                   options={instrument.tunings.map((t) => ({ value: t.id, label: t.label }))}
                 />
               </label>
+            )}
+            {instrument.tunings.length > 1 && (
+              <Hint>An alternate string tuning for this instrument, e.g. drop D or open G.</Hint>
             )}
             {transpose !== 0 && (
               <p className="text-xs text-muted">
@@ -303,6 +308,7 @@ export default function Tuner() {
                 ]}
               />
             </label>
+            <Hint>Which microphone or audio interface to listen through.</Hint>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-muted">Sensitivity</span>
               <Select
@@ -314,6 +320,7 @@ export default function Tuner() {
                 }))}
               />
             </label>
+            <Hint>How quiet a signal can be before it&apos;s ignored as silence — raise it in a noisy room.</Hint>
           </CollapsiblePanel>
 
           <CollapsiblePanel id="tuner-tone" title="Reference & tone" icon={SlidersIcon}>
@@ -344,6 +351,10 @@ export default function Tuner() {
                 className="slider h-6 w-full cursor-pointer"
               />
             </label>
+            <Hint>
+              The frequency of concert A, in Hz. 440 is standard; some orchestras and older
+              recordings tune a little sharp or flat of it.
+            </Hint>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-muted">Tone generator sound</span>
               <Select
@@ -352,6 +363,7 @@ export default function Tuner() {
                 options={WAVEFORMS}
               />
             </label>
+            <Hint>The waveform played when you tap a note on the dial or a string below to hear it.</Hint>
           </CollapsiblePanel>
         </>
       }

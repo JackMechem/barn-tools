@@ -137,6 +137,15 @@ export function MicIcon({ className }: { className?: string }) {
   );
 }
 
+export function ScaleIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M4 20v-3M9 20v-6M14 20v-9M19 20v-12" />
+      <path d="M4 17l5-3 5-3 5-3" />
+    </svg>
+  );
+}
+
 export function TunerIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>
@@ -352,6 +361,14 @@ export const NAV_LINKS = [
     description:
       "Random notes in your instrument's range, with a listen mode that grades you.",
     icon: NoteIcon,
+    category: "Practice" as Category,
+  },
+  {
+    href: "/scale-trainer",
+    label: "Scale Trainer",
+    description:
+      "Random scales in your instrument's range, with a listen mode that grades you note by note.",
+    icon: ScaleIcon,
     category: "Practice" as Category,
   },
   {

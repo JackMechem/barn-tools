@@ -15,6 +15,7 @@ import {
   FlagIcon,
   MicIcon,
   NoteIcon,
+  ScaleIcon,
   SlidersIcon,
   StopwatchIcon,
 } from "@/components/tools";
@@ -25,6 +26,8 @@ import {
   listAudioInputs,
   startAudioInput,
 } from "@/lib/audioInput";
+import { scheduleClick } from "@/lib/clickEngine";
+import { getAudioContext } from "@/lib/metronome";
 import {
   GRADE_COLOR,
   GRADE_LABEL,
@@ -34,13 +37,18 @@ import {
   gradePitch,
   scoreOf,
 } from "@/lib/noteGrade";
+import { midiToNote, parseNote, parseRange } from "@/lib/noteRange";
 import {
-  ParsedRange,
-  midiToNote,
-  parseNote,
-  parseRange,
-  randomNoteInRange,
-} from "@/lib/noteRange";
+  DEFAULT_ENABLED_SCALE_IDS,
+  SCALE_CATEGORIES,
+  SCALE_MODES,
+  ScaleMode,
+  ScaleRound,
+  drillQueueForPool,
+  randomMode,
+  randomScaleRound,
+  scaleRoundForPitchClass,
+} from "@/lib/scales";
 import { usePersistedSettings } from "@/lib/usePersistedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 import { DEFAULT_TONE_ID, TONES, playNote } from "@/lib/tones";
@@ -56,82 +64,74 @@ import {
   bumpGradeCounts,
   rankWeak,
 } from "@/lib/struggleStats";
-import { scheduleClick } from "@/lib/clickEngine";
-import { getAudioContext } from "@/lib/metronome";
 import AdvancedSlider from "@/components/AdvancedSlider";
 import CountdownLabel from "@/components/CountdownLabel";
 import CountdownRing from "@/components/CountdownRing";
 import ElapsedTimer from "@/components/ElapsedTimer";
 
-const MIN_INTERVAL_SECONDS = 0.5;
-const MAX_INTERVAL_SECONDS = 10;
-const DEFAULT_INTERVAL_SECONDS = 3;
+const MIN_INTERVAL_SECONDS = 1;
+const MAX_INTERVAL_SECONDS = 20;
+const DEFAULT_INTERVAL_SECONDS = 6;
 
-const NOTE_DURATION_SECONDS = 1;
+/** Spacing for "play the scale out loud", one note at a time. */
+const SCALE_NOTE_DURATION_SECONDS = 0.35;
+const SCALE_NOTE_GAP_MS = 380;
 
-/** "Shed a string" covers the open note up to two octaves above it (24 semitones) — a reasonable
-    single-string span on a fretted or bowed instrument in normal playing position — clamped to
-    the instrument's own declared range in case that's the tighter limit. */
-const STRING_SPAN_SEMITONES = 24;
-
-const MIN_NOTE_COUNT = 5;
-const MAX_NOTE_COUNT = 50;
+const MIN_SCALE_COUNT = 5;
+const MAX_SCALE_COUNT = 30;
 const FRAME_MS = 30;
-
-/** "Shed weak notes" pulls in every struggling note in range, but caps out here so a long
-    history doesn't turn into a marathon session. */
-const MAX_WEAK_QUEUE = MAX_NOTE_COUNT;
 
 const MIN_ADVANCE_DELAY_MS = 0;
 const MAX_ADVANCE_DELAY_MS = 8000;
 const DEFAULT_ADVANCE_DELAY_MS = 1500;
 
-/** With octave ignored, every note is graded by letter name alone, so the pool is just these 12. */
-const IGNORE_OCTAVE_RANGE = "C4-B4";
-
 type Session = {
   total: number;
   index: number;
-  target: string | null;
+  round: ScaleRound | null;
+  /** Index into `round.notes` of the scale degree currently being listened for. */
+  noteIndex: number;
   best: Grade | null;
-  /** A stable wrong note was played during this note. */
-  wrongPlayed: boolean;
+  /** How many wrong attempts the current scale degree has had (partial-credit mode only; a
+      second wrong attempt on the same degree fails the round). */
+  degreeMisses: number;
+  /** A wrong note (that was then retried and fixed) happened somewhere in this round, so a
+      round that finishes is graded "partial" rather than "correct". */
+  hadMistake: boolean;
   results: Grade[];
-  notes: string[];
+  rounds: ScaleRound[];
   stable: number;
   last: number | null;
-  /** The previous note's pitch, so its tail ringing into this note isn't graded against it. */
+  /** The previous note's pitch, so its tail ringing into the next one isn't graded against it. */
   previousMidi: number | null;
   /** False until the previous note has stopped (silence or a genuinely new pitch). */
   settled: boolean;
-  /** Drill mode only: notes left to play, popped from the front; a full miss goes back on the end. */
-  queue: string[];
+  /** The pitch of the last note actually matched within this round (null at the start of a
+      round) — separate from `previousMidi`, which also covers the previous round's last note for
+      tail-ringing purposes. Used only by "Ignore repeated notes" to recognize a fresh attack of
+      the same note as a double-attack rather than a new attempt. */
+  lastCorrectMidi: number | null;
+  /** Drill mode only: scales left to play, popped from the front; a miss goes back on the end. */
+  queue: ScaleRound[];
 };
 
-type Summary = { results: Grade[]; notes: string[] };
+type Summary = { results: Grade[]; rounds: ScaleRound[] };
 
-/** What kind of session `start()` should run. `"string"` carries which of the current
-    instrument's strings (an index into its `strings` array) to shed. */
-type StartRequest =
-  | { kind: "normal" }
-  | { kind: "weak" }
-  | { kind: "string"; stringIndex: number };
-
-/** Everything that affects what notes are drawn, how they're timed, and how they're graded —
+/** Everything that affects what scales are drawn, how they're timed, and how they're graded —
     two attempts only get compared against each other if all of this matches. */
 type HistoryConfig = {
   rangeInput: string;
-  ignoreOctave: boolean;
   drillMode: boolean;
-  requeuePartials: boolean;
-  noteCount: number;
+  scaleCount: number;
+  /** The selected scale mode ids, sorted and joined, so the set (order doesn't matter) compares
+      with a plain `===`. */
+  scaleModesKey: string;
   accidentalStyle: AccidentalStyle;
   intervalSeconds: number;
   toleranceCents: number;
   holdMs: number;
   advanceDelayMs: number;
   refA: number;
-  partialCredit: boolean;
   sensitivity: string;
 };
 
@@ -149,8 +149,8 @@ type HistoryEntry = {
   config: HistoryConfig;
 };
 
-const PANEL_IDS = ["notes", "note-listen", "note-sound"];
-const SETTINGS_KEY = "jam-practice-note-trainer";
+const PANEL_IDS = ["scale-modes", "scale-range", "scale-listen", "scale-sound"];
+const SETTINGS_KEY = "jam-practice-scale-trainer";
 const DEFAULT_SETTINGS = {
   instrumentId: INSTRUMENTS[0].id,
   customRange: "A1-A6",
@@ -161,22 +161,24 @@ const DEFAULT_SETTINGS = {
   advanceDelayMs: DEFAULT_ADVANCE_DELAY_MS,
   refA: 440,
   sensitivity: "normal",
-  partialCredit: true,
+  partialCredit: false,
+  ignoreRepeatedNotes: false,
   soundFeedback: false,
   playSound: false,
   showNext: false,
+  showScaleNotes: true,
   toneId: DEFAULT_TONE_ID,
   listenMode: false,
-  noteCount: 10,
+  scaleCount: 10,
   drillMode: false,
-  requeuePartials: false,
   history: [] as HistoryEntry[],
-  noteStats: {} as Record<string, GradeCounts>,
   accidentalStyle: "sharp" as AccidentalStyle,
   inputDeviceId: "",
+  scaleModes: DEFAULT_ENABLED_SCALE_IDS as string[],
+  scaleStats: {} as Record<string, GradeCounts>,
 };
 
-export default function NoteTrainer() {
+export default function ScaleTrainer() {
   const [settings, updateSettings] = usePersistedSettings(
     SETTINGS_KEY,
     DEFAULT_SETTINGS,
@@ -186,6 +188,7 @@ export default function NoteTrainer() {
     intervalSeconds,
     playSound,
     showNext,
+    showScaleNotes,
     toneId,
     listenMode,
     ignoreOctave,
@@ -193,10 +196,10 @@ export default function NoteTrainer() {
     holdMs,
     advanceDelayMs,
     refA,
-    partialCredit,
-    soundFeedback,
     drillMode,
-    requeuePartials,
+    partialCredit,
+    ignoreRepeatedNotes,
+    soundFeedback,
   } = settings;
   // Drop any entries saved before "config" existed (or otherwise malformed) rather than
   // crashing on them.
@@ -211,16 +214,16 @@ export default function NoteTrainer() {
     : "sharp";
   const sensitivity =
     settings.sensitivity in SENSITIVITY ? settings.sensitivity : "normal";
-  const noteCount = Math.min(
-    MAX_NOTE_COUNT,
-    Math.max(MIN_NOTE_COUNT, Math.round(settings.noteCount)),
+  const scaleCount = Math.min(
+    MAX_SCALE_COUNT,
+    Math.max(MIN_SCALE_COUNT, Math.round(settings.scaleCount)),
   );
   const instrumentId =
     settings.instrumentId === CUSTOM_INSTRUMENT_ID ||
     INSTRUMENTS.some((i) => i.id === settings.instrumentId)
       ? settings.instrumentId
       : INSTRUMENTS[0].id;
-  const instrument = INSTRUMENTS.find((i) => i.id === instrumentId);
+  const pool = SCALE_MODES.filter((m) => settings.scaleModes.includes(m.id));
   const setInstrumentId = (instrumentId: string) =>
     updateSettings({ instrumentId });
   const setCustomRange = (customRange: string) =>
@@ -229,20 +232,33 @@ export default function NoteTrainer() {
     updateSettings({ intervalSeconds });
   const setPlaySound = (playSound: boolean) => updateSettings({ playSound });
   const setShowNext = (showNext: boolean) => updateSettings({ showNext });
+  const setShowScaleNotes = (showScaleNotes: boolean) =>
+    updateSettings({ showScaleNotes });
   const setToneId = (toneId: string) => updateSettings({ toneId });
   const setListenMode = (listenMode: boolean) => updateSettings({ listenMode });
-  const setNoteCount = (noteCount: number) => updateSettings({ noteCount });
+  const setScaleCount = (scaleCount: number) => updateSettings({ scaleCount });
   const setDrillMode = (drillMode: boolean) => updateSettings({ drillMode });
-  const setRequeuePartials = (requeuePartials: boolean) =>
-    updateSettings({ requeuePartials });
+  const setIgnoreOctave = (ignoreOctave: boolean) =>
+    updateSettings({ ignoreOctave });
+  const setPartialCredit = (partialCredit: boolean) =>
+    updateSettings({ partialCredit });
+  const setIgnoreRepeatedNotes = (ignoreRepeatedNotes: boolean) =>
+    updateSettings({ ignoreRepeatedNotes });
+  const setSoundFeedback = (soundFeedback: boolean) =>
+    updateSettings({ soundFeedback });
   const setAccidentalStyle = (accidentalStyle: AccidentalStyle) =>
     updateSettings({ accidentalStyle });
   const setInputDeviceId = (inputDeviceId: string) =>
     updateSettings({ inputDeviceId });
-  const setSoundFeedback = (soundFeedback: boolean) =>
-    updateSettings({ soundFeedback });
-  const [note, setNote] = useState<string | null>(null);
-  const [nextNote, setNextNote] = useState<string | null>(null);
+  const toggleScaleMode = (id: string) =>
+    updateSettings({
+      scaleModes: settings.scaleModes.includes(id)
+        ? settings.scaleModes.filter((x) => x !== id)
+        : [...settings.scaleModes, id],
+    });
+
+  const [round, setRound] = useState<ScaleRound | null>(null);
+  const [nextRound, setNextRound] = useState<ScaleRound | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputs, setInputs] = useState<InputDevice[]>([]);
@@ -256,23 +272,23 @@ export default function NoteTrainer() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [lastElapsedMs, setLastElapsedMs] = useState<number | null>(null);
   const [isNewBest, setIsNewBest] = useState(false);
-  // Mirrors noteSeedRef for the render-time reads (noteLabel in JSX); the ref itself is only
+  // Mirrors roundSeedRef for the render-time reads (labels in JSX); the ref itself is only
   // read from the audio callback, which runs outside render.
-  const [noteSeed, setNoteSeed] = useState(0);
-  // So "Try again" repeats a "Shed weak notes" run instead of falling back to a normal one.
-  const [lastRequest, setLastRequest] = useState<StartRequest>({ kind: "normal" });
-  // "Shed a string" always shows (and grades) the full note+octave, regardless of the "Ignore
-  // octave" setting — knowing which specific pitch you're on matters when it's just one string.
-  // Left in place after the session ends too, so the results screen matches what was practiced.
-  const effectiveIgnoreOctave =
-    lastRequest.kind === "string" ? false : ignoreOctave;
+  const [roundSeed, setRoundSeed] = useState(0);
+  // How many notes of the current round have been matched, for the note-by-note pills.
+  const [scaleProgress, setScaleProgress] = useState(0);
+  // Partial-credit mode only: the current degree has had one wrong attempt and is waiting for
+  // a retry, for the note pill's "try again" styling.
+  const [degreeMiss, setDegreeMiss] = useState(false);
+  // So "Try again" repeats a "Shed weak scales" run instead of falling back to a normal one.
+  const [lastMode, setLastMode] = useState<"normal" | "weak">("normal");
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const noteTimerRef = useRef({ startedAt: 0, durationMs: 1000 });
-  const upcomingRef = useRef<string | null>(null);
-  // Bumped every time a new target note is chosen, so "random" accidental spelling stays put
-  // for as long as that note's on screen instead of re-rolling on every re-render.
-  const noteSeedRef = useRef(0);
+  const upcomingRef = useRef<ScaleRound | null>(null);
+  // Bumped every time a new round is chosen, so "random" accidental spelling stays put for as
+  // long as that round's on screen instead of re-rolling on every re-render.
+  const roundSeedRef = useRef(0);
   // When the current listen-mode session started, for the "your time" shown when it finishes.
   const sessionStartRef = useRef<number | null>(null);
   const playSoundRef = useRef(playSound);
@@ -281,72 +297,70 @@ export default function NoteTrainer() {
   const mountedRef = useRef(true);
   const sessionRef = useRef<Session | null>(null);
   const listenCfg = useRef({
-    ignoreOctave: effectiveIgnoreOctave,
     accidentalStyle,
+    ignoreOctave,
     toleranceCents,
     holdFrames: 4,
     advanceDelayMs,
     refA,
     partialCredit,
+    ignoreRepeatedNotes,
     soundFeedback,
     silenceRms: SENSITIVITY.normal.rms,
   });
   const skipRef = useRef<(() => void) | null>(null);
   const skipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scalePlaybackTimeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
   const countdownClickTimeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
-  // The source of truth for noteStats *during* a running session: a session bumps this once per
-  // note, several times before the next `updateSettings({ noteStats })` round-trips back through
-  // a render, so reading the settings value itself here would silently drop all but the last bump.
-  const noteStatsRef = useRef(settings.noteStats);
+  // The source of truth for scaleStats *during* a running session — see the identical note on
+  // Note Trainer's noteStatsRef for why a ref (not the settings value) is what gets bumped.
+  const scaleStatsRef = useRef(settings.scaleStats);
 
   useEffect(() => {
     playSoundRef.current = playSound;
     toneIdRef.current = toneId;
     listenCfg.current = {
-      ignoreOctave: effectiveIgnoreOctave,
       accidentalStyle,
+      ignoreOctave,
       toleranceCents,
       holdFrames: Math.max(1, Math.round(holdMs / FRAME_MS)),
       advanceDelayMs,
       refA,
       partialCredit,
+      ignoreRepeatedNotes,
       soundFeedback,
       silenceRms: SENSITIVITY[sensitivity].rms,
     };
   }, [
     playSound,
     toneId,
-    effectiveIgnoreOctave,
     accidentalStyle,
+    ignoreOctave,
     toleranceCents,
     holdMs,
     advanceDelayMs,
     refA,
     partialCredit,
+    ignoreRepeatedNotes,
     soundFeedback,
     sensitivity,
   ]);
 
-  // Keeps the ref caught up with anything that changed it from outside a running session (the
-  // initial load from localStorage, or the "Clear stats" button).
   useEffect(() => {
-    noteStatsRef.current = settings.noteStats;
-  }, [settings.noteStats]);
+    scaleStatsRef.current = settings.scaleStats;
+  }, [settings.scaleStats]);
 
   const isCustom = instrumentId === CUSTOM_INSTRUMENT_ID;
-  // Ignoring octave means only the letter name is graded, so the instrument's range doesn't
-  // matter — the note pool collapses to one octave's worth (12 notes).
-  const rangeInput = ignoreOctave
-    ? IGNORE_OCTAVE_RANGE
-    : isCustom
-      ? customRange
-      : (INSTRUMENTS.find((i) => i.id === instrumentId)?.range ?? "");
+  const rangeInput = isCustom
+    ? customRange
+    : (INSTRUMENTS.find((i) => i.id === instrumentId)?.range ?? "");
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       if (intervalRef.current) clearInterval(intervalRef.current);
+      scalePlaybackTimeouts.current.forEach(clearTimeout);
       countdownClickTimeouts.current.forEach(clearTimeout);
       inputRef.current?.stop();
     };
@@ -373,37 +387,72 @@ export default function NoteTrainer() {
     ? settings.inputDeviceId
     : "";
 
+  /** Struggle stats are tracked per *key* of a mode, not just the mode overall — "F# Dorian" and
+      "C Dorian" are separate struggles — so a scale is either played through or it isn't, and a
+      "shed" session can drill the exact key that's actually giving trouble rather than a random
+      root of the same mode. The stat key folds both into one string: the root's pitch class
+      (0-11, not a spelled letter, so it stays the same struggle across accidental-style changes
+      and doesn't care what octave it was played in) and the mode id. */
+  function scaleStatKey(pitchClass: number, modeId: string): string {
+    return `${pitchClass}:${modeId}`;
+  }
+
+  type WeakScale = {
+    key: string;
+    mode: ScaleMode;
+    pitchClass: number;
+    counts: GradeCounts;
+    score: number;
+  };
+
+  /** Undoes `scaleStatKey`, dropping anything that doesn't parse to a real pitch class and mode
+      (stale data from an older format, or a mode that's since been removed). */
+  function parseScaleStatKey(key: string): { pitchClass: number; mode: ScaleMode } | null {
+    const [pitchClassText, modeId] = key.split(":");
+    const pitchClass = Number(pitchClassText);
+    if (!Number.isInteger(pitchClass) || pitchClass < 0 || pitchClass > 11) return null;
+    const mode = SCALE_MODES.find((m) => m.id === modeId);
+    return mode ? { pitchClass, mode } : null;
+  }
+
+  /** Records one more grade for this key+mode in the lifetime struggle stats. */
+  function bumpScaleStat(pitchClass: number, modeId: string, grade: Grade) {
+    const key = scaleStatKey(pitchClass, modeId);
+    scaleStatsRef.current = bumpGradeCounts(scaleStatsRef.current, key, grade);
+    updateSettings({ scaleStats: scaleStatsRef.current });
+  }
+
+  function clearScaleStats() {
+    scaleStatsRef.current = {};
+    updateSettings({ scaleStats: {} });
+  }
+
+  /** A note name for a bare pitch class (no octave), spelled per the current accidental style —
+      e.g. 6 -> "F#" or "Gb". */
+  function pitchClassLabel(pitchClass: number, seq = 0): string {
+    return spellNote(midiToNote(60 + pitchClass), accidentalStyle, seq, true);
+  }
+
+  /** Every struggling key+mode in `stats`, worst first. A plain function of its arguments (not
+      the ref) so it's just as safe to call during render (for the button's count) as from inside
+      a running session (via `scaleStatsRef.current`). */
+  function weakScaleEntries(stats: Record<string, GradeCounts>): WeakScale[] {
+    return rankWeak(stats)
+      .map((entry) => {
+        const parsed = parseScaleStatKey(entry.key);
+        return parsed && { ...parsed, key: entry.key, counts: entry.counts, score: entry.score };
+      })
+      .filter((entry): entry is WeakScale => !!entry);
+  }
+
+  function clearScalePlayback() {
+    scalePlaybackTimeouts.current.forEach(clearTimeout);
+    scalePlaybackTimeouts.current = [];
+  }
+
   function clearCountdownClicks() {
     countdownClickTimeouts.current.forEach(clearTimeout);
     countdownClickTimeouts.current = [];
-  }
-
-  /** Records one more grade for this note in the lifetime struggle stats. */
-  function bumpNoteStat(note: string, grade: Grade) {
-    noteStatsRef.current = bumpGradeCounts(noteStatsRef.current, note, grade);
-    updateSettings({ noteStats: noteStatsRef.current });
-  }
-
-  function clearNoteStats() {
-    noteStatsRef.current = {};
-    updateSettings({ noteStats: {} });
-  }
-
-  /** Every struggling note in `stats` that's actually playable in `range`, worst first, capped so
-      a long history doesn't turn "shed weak notes" into a marathon. A plain function of its
-      arguments (not the ref) so it's just as safe to call during render (for the button's count)
-      as from inside a running session (via `noteStatsRef.current`, for freshness there). */
-  function weakNotesInRange(
-    stats: Record<string, GradeCounts>,
-    range: ParsedRange,
-  ): string[] {
-    return rankWeak(stats)
-      .filter((entry) => {
-        const midi = parseNote(entry.key);
-        return midi !== null && midi >= range.lowMidi && midi <= range.highMidi;
-      })
-      .slice(0, MAX_WEAK_QUEUE)
-      .map((entry) => entry.key);
   }
 
   /** A short neutral click, for "Sound feedback" — reuses the metronome's click tone rather than
@@ -414,8 +463,8 @@ export default function NoteTrainer() {
     scheduleClick(ctx, ctx.currentTime + 0.02, "sine", 1000, 0.5, 0.05);
   }
 
-  /** One click per whole second of the countdown to the next note (so it ticks in step with
-      the "Next note in Ns" readout), for "Sound feedback". */
+  /** One click per whole second of the countdown to the next scale (so it ticks in step with
+      the "Next scale in Ns" readout), for "Sound feedback". */
   function scheduleCountdownClicks(durationMs: number) {
     clearCountdownClicks();
     if (!listenCfg.current.soundFeedback) return;
@@ -423,6 +472,19 @@ export default function NoteTrainer() {
     for (let s = 1; s <= wholeSeconds; s++) {
       countdownClickTimeouts.current.push(setTimeout(playClick, s * 1000));
     }
+  }
+
+  /** Plays every note of the scale in order, spaced out, for "Play scale out loud". */
+  function playScaleSound(notes: string[]) {
+    clearScalePlayback();
+    notes.forEach((n, i) => {
+      scalePlaybackTimeouts.current.push(
+        setTimeout(
+          () => playNote(n, SCALE_NOTE_DURATION_SECONDS, toneIdRef.current),
+          i * SCALE_NOTE_GAP_MS,
+        ),
+      );
+    });
   }
 
   function endSession() {
@@ -433,6 +495,7 @@ export default function NoteTrainer() {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    clearScalePlayback();
     clearCountdownClicks();
     inputRef.current?.stop();
     inputRef.current = null;
@@ -442,35 +505,44 @@ export default function NoteTrainer() {
     setHeard(null);
     setProgress(null);
     setWaiting(false);
+    setScaleProgress(0);
+    setDegreeMiss(false);
   }
 
   function stop() {
     endSession();
   }
 
-  /** Locks in a correct/partial result and starts the pause-before-next-note countdown:
-      retargets the ring/label (previously counting down the max time) to the pause instead, so
-      it visibly counts down to the next note, and plays the click/tick sounds when
-      "Sound feedback" is on. */
-  function lockInResult(grade: Grade, index: number) {
+  /** Lets the round's pass/fail be seen briefly before moving on. */
+  function scheduleAdvance(index: number) {
+    if (skipTimeoutRef.current) return;
+    skipTimeoutRef.current = setTimeout(() => {
+      skipTimeoutRef.current = null;
+      if (sessionRef.current?.index === index) skipRef.current?.();
+    }, listenCfg.current.advanceDelayMs);
+  }
+
+  /** Locks in a round's grade and starts the pause-before-next-scale countdown: retargets the
+      ring/label (previously counting down the listening time) to the pause instead, so it visibly
+      counts down to the next scale, and plays the click/tick sounds when "Sound feedback" is on. */
+  function lockInRound(grade: Grade) {
+    const session = sessionRef.current;
+    if (!session) return;
+    session.best = grade;
+    setStatus(grade);
     const pauseMs = listenCfg.current.advanceDelayMs;
     noteTimerRef.current = { startedAt: performance.now(), durationMs: pauseMs };
     if (listenCfg.current.soundFeedback) {
       playClick();
       scheduleCountdownClicks(pauseMs);
     }
-    if (!skipTimeoutRef.current) {
-      skipTimeoutRef.current = setTimeout(() => {
-        skipTimeoutRef.current = null;
-        if (sessionRef.current?.index === index) skipRef.current?.();
-      }, pauseMs);
-    }
+    scheduleAdvance(session.index);
   }
 
   /** Called ~30 times a second with whatever pitch the input is hearing. */
   function handleFrame(freq: number | null) {
     const session = sessionRef.current;
-    if (!session || session.target === null) return;
+    if (!session || !session.round) return;
     if (freq === null) {
       session.stable = 0;
       session.last = null;
@@ -481,11 +553,11 @@ export default function NoteTrainer() {
     }
     const cfg = listenCfg.current;
     const { note: heardNote, cents } = describePitch(freq, cfg.refA);
-    // Reuses the current target's seed so a "random" spelling doesn't flicker every frame.
+    // Reuses the current round's seed so a "random" spelling doesn't flicker every frame.
     const shownNote = spellNote(
       heardNote,
       cfg.accidentalStyle,
-      noteSeedRef.current,
+      roundSeedRef.current,
       cfg.ignoreOctave,
     );
     setHeard(`${shownNote} (${cents > 0 ? "+" : ""}${cents}¢)`);
@@ -499,83 +571,102 @@ export default function NoteTrainer() {
     if (session.stable < cfg.holdFrames) return;
 
     // The tail of the previous note ringing on shouldn't be graded as an attempt at this one;
-    // wait until it's stopped or a genuinely different pitch is heard.
+    // wait until it's stopped or a genuinely different pitch is heard. This applies both between
+    // scale degrees within a round and between rounds.
     if (!session.settled) {
       if (nearest === session.previousMidi) return;
       session.settled = true;
     }
 
-    // Once the note has been played right (cleanly or after a slip), later notes don't change it.
-    if (session.best === "correct" || session.best === "partial") return;
+    // Once this round's grade is locked in (pass or fail), further input doesn't change it —
+    // it's just waiting for the scheduled advance.
+    if (session.best !== null) return;
 
-    const played = gradePitch(freq, session.target, {
+    // A fresh attack of the exact note just matched — e.g. a double pluck, or genuinely playing
+    // it twice by accident — isn't a new attempt at the next degree; ignore it and keep waiting.
+    if (
+      cfg.ignoreRepeatedNotes &&
+      session.lastCorrectMidi !== null &&
+      nearest === session.lastCorrectMidi
+    ) {
+      session.previousMidi = nearest;
+      session.settled = false;
+      session.stable = 0;
+      session.last = null;
+      return;
+    }
+
+    const expected = session.round.notes[session.noteIndex];
+    const played = gradePitch(freq, expected, {
       ignoreOctave: cfg.ignoreOctave,
       toleranceCents: cfg.toleranceCents,
       refA: cfg.refA,
     });
+
     if (played === "incorrect") {
-      session.wrongPlayed = true;
-      if (session.best !== "incorrect") {
-        session.best = "incorrect";
-        setStatus("incorrect");
+      if (!cfg.partialCredit) {
+        // A wrong note anywhere in the sequence fails the whole scale immediately.
+        lockInRound("incorrect");
+        return;
       }
-    } else {
-      // A wrong note before the right one only earns partial credit.
-      const result: Grade =
-        session.wrongPlayed && cfg.partialCredit ? "partial" : "correct";
-      session.best = result;
-      setStatus(result);
-      lockInResult(result, session.index);
+      // Partial credit: the same degree gets one retry before the round fails.
+      session.hadMistake = true;
+      session.degreeMisses++;
+      if (session.degreeMisses >= 2) {
+        setDegreeMiss(false);
+        lockInRound("incorrect");
+        return;
+      }
+      // First miss on this degree: flag it and keep listening for the same note, rather than
+      // moving on. Settle first so the wrong note's own tail isn't graded as a second attempt.
+      setDegreeMiss(true);
+      session.previousMidi = nearest;
+      session.settled = false;
+      session.stable = 0;
+      session.last = null;
+      return;
+    }
+
+    // The right note: settle before grading the next one, so its own tail isn't mistaken for
+    // an attempt at the degree after it.
+    session.previousMidi = nearest;
+    session.lastCorrectMidi = nearest;
+    session.settled = false;
+    session.stable = 0;
+    session.last = null;
+    session.degreeMisses = 0;
+    setDegreeMiss(false);
+    session.noteIndex++;
+    setScaleProgress(session.noteIndex);
+
+    if (session.noteIndex >= session.round.notes.length) {
+      lockInRound(session.hadMistake ? "partial" : "correct");
     }
   }
 
-  /** `"weak"` starts a focused session on just the notes tracked as struggles (see
-      `weakNotesInRange`) instead of the normal quiz/drill. `"string"` instead sheds one specific
-      string of the current instrument — every note from its open string up to
-      `STRING_SPAN_SEMITONES` above it (clamped to the instrument's own range), always graded and
-      shown with the octave regardless of "Ignore octave" (see `effectiveIgnoreOctave`), computed
-      straight from the instrument's own declared range rather than `rangeInput`/`customRange`, so
-      it's unaffected by whatever those happen to be set to. Both modes always listen (regardless
-      of the "Listen mode" toggle, which is switched on to match) and never touch the timed
-      History list, since a short focused session isn't a fair comparison against a full one. */
-  async function start(request: StartRequest = { kind: "normal" }) {
-    setLastRequest(request);
-    const weak = request.kind === "weak";
-    // Either kind of focused session (weak or one string) shares the same queue machinery and
-    // both skip the timed History list — see the doc comment above.
-    const focused = weak || request.kind === "string";
-    const stringOpenNote =
-      request.kind === "string" ? instrument?.strings?.[request.stringIndex] : undefined;
-
-    let range: ParsedRange | null;
-    if (request.kind === "string") {
-      const instrumentRange = instrument ? parseRange(instrument.range) : null;
-      const openMidi = stringOpenNote ? parseNote(stringOpenNote) : null;
-      range =
-        instrumentRange && openMidi !== null
-          ? {
-              lowMidi: openMidi,
-              highMidi: Math.min(instrumentRange.highMidi, openMidi + STRING_SPAN_SEMITONES),
-            }
-          : null;
-      if (!range) {
-        setError("Couldn't find that string.");
-        return;
-      }
-    } else {
-      range = parseRange(rangeInput);
-      if (!range) {
-        setError('Enter a valid range like "A1-A6".');
-        return;
-      }
+  /** `"weak"` starts a focused session on just the exact key+mode combos tracked as struggles
+      (see `weakScaleEntries`) instead of the normal quiz/drill — one round per struggling key,
+      not the full 12-key sweep "Drill every scale" does per mode, so it stays a quick, targeted
+      practice on exactly what's giving trouble. Always listens (regardless of the "Listen mode"
+      toggle, which is switched on to match) and never touches the timed History list, since a
+      short weak-scales session isn't a fair comparison against a full one. */
+  async function start(mode: "normal" | "weak" = "normal") {
+    const weak = mode === "weak";
+    setLastMode(mode);
+    const range = parseRange(rangeInput);
+    if (!range) {
+      setError('Enter a valid range like "A1-A6".');
+      return;
     }
-    const weakQueueSeed = weak
-      ? weakNotesInRange(noteStatsRef.current, range)
-      : [];
-    if (weak && weakQueueSeed.length === 0) {
+    const weakList = weak ? weakScaleEntries(scaleStatsRef.current) : [];
+    if (weak && weakList.length === 0) {
       setError(
-        "No struggling notes in this range yet — misses in listen mode build this list up.",
+        "No struggling scales yet — misses in listen mode build this list up.",
       );
+      return;
+    }
+    if (!weak && pool.length === 0) {
+      setError("Select at least one scale to practice.");
       return;
     }
     setError(null);
@@ -583,12 +674,13 @@ export default function NoteTrainer() {
     if (intervalRef.current) clearInterval(intervalRef.current);
     inputRef.current?.stop();
     inputRef.current = null;
+    clearScalePlayback();
 
-    const listening = focused ? true : listenMode;
-    if (focused && !listenMode) updateSettings({ listenMode: true });
-    // "Drill every note", "shed weak notes" and "shed a string" all play through a fixed queue
-    // rather than `noteCount` random draws — same machinery either way, just a different queue.
-    const drilling = focused ? true : listening && drillMode;
+    const listening = weak ? true : listenMode;
+    if (weak && !listenMode) updateSettings({ listenMode: true });
+    // "Drill every scale" and "shed weak scales" both play through a fixed queue rather than
+    // `scaleCount` random draws — same machinery either way, just a different starting queue.
+    const drilling = weak ? true : listening && drillMode;
     if (listening) {
       try {
         const input = await startAudioInput(
@@ -610,26 +702,29 @@ export default function NoteTrainer() {
         return;
       }
       const queue = weak
-        ? shuffled(weakQueueSeed)
+        ? shuffled(
+            weakList.map((e) =>
+              scaleRoundForPitchClass(range, e.mode, e.pitchClass),
+            ),
+          )
         : drilling
-          ? shuffled(
-              Array.from({ length: range.highMidi - range.lowMidi + 1 }, (_, i) =>
-                midiToNote(range.lowMidi + i),
-              ),
-            )
+          ? shuffled(drillQueueForPool(range, pool))
           : [];
       sessionRef.current = {
-        total: drilling ? queue.length : noteCount,
+        total: drilling ? queue.length : scaleCount,
         index: 0,
-        target: null,
+        round: null,
+        noteIndex: 0,
         best: null,
-        wrongPlayed: false,
+        degreeMisses: 0,
+        hadMistake: false,
         results: [],
-        notes: [],
+        rounds: [],
         stable: 0,
         last: null,
         previousMidi: null,
         settled: true,
+        lastCorrectMidi: null,
         queue,
       };
       sessionStartRef.current = performance.now();
@@ -644,23 +739,23 @@ export default function NoteTrainer() {
         clearTimeout(skipTimeoutRef.current);
         skipTimeoutRef.current = null;
       }
+      clearScalePlayback();
       clearCountdownClicks();
       const session = sessionRef.current;
       if (session) {
-        // Lock in the note that just finished; silence counts as a miss.
+        // Lock in the scale that just finished; a timeout counts as a miss.
         const finishedGrade = session.best ?? "incorrect";
-        if (session.target !== null) {
+        if (session.round) {
           session.results.push(finishedGrade);
-          session.notes.push(session.target);
-          bumpNoteStat(session.target, finishedGrade);
-          // Drill mode: a full miss goes back on the end of the queue, and optionally so
-          // does a partial.
-          if (
-            drilling &&
-            (finishedGrade === "incorrect" ||
-              (finishedGrade === "partial" && requeuePartials))
-          ) {
-            session.queue.push(session.target);
+          session.rounds.push(session.round);
+          const pitchClass = ((session.round.rootMidi % 12) + 12) % 12;
+          bumpScaleStat(pitchClass, session.round.mode.id, finishedGrade);
+          // Drill mode: a miss goes back on the end of the queue — with a freshly randomized
+          // octave for the retry, so a repeated miss doesn't look like the exact same round.
+          if (drilling && finishedGrade === "incorrect") {
+            session.queue.push(
+              scaleRoundForPitchClass(range, session.round.mode, pitchClass),
+            );
           }
         }
         const done = drilling
@@ -671,26 +766,26 @@ export default function NoteTrainer() {
             ? performance.now() - sessionStartRef.current
             : 0;
           sessionStartRef.current = null;
-          if (focused) {
-            // A weed-out session over a handful of struggling notes, or over just one string,
-            // isn't a fair comparison against a full quiz/drill, so it doesn't join that
-            // leaderboard.
+          if (weak) {
+            // A weed-out session over a handful of struggling modes isn't a fair comparison
+            // against a full quiz/drill, so it doesn't join that leaderboard.
             setLastElapsedMs(null);
             setIsNewBest(false);
           } else {
             const config: HistoryConfig = {
               rangeInput,
-              ignoreOctave,
               drillMode,
-              requeuePartials,
-              noteCount,
+              scaleCount,
+              scaleModesKey: pool
+                .map((m) => m.id)
+                .sort()
+                .join(","),
               accidentalStyle,
               intervalSeconds,
               toleranceCents,
               holdMs,
               advanceDelayMs,
               refA,
-              partialCredit,
               sensitivity,
             };
             // Compare against times recorded before this one, so tying/beating an empty
@@ -698,10 +793,11 @@ export default function NoteTrainer() {
             const previousBest = history
               .filter((h) => sameConfig(h.config, config))
               .reduce((min, h) => Math.min(min, h.elapsedMs), Infinity);
+            const score = scoreOf(session.results);
             const entry: HistoryEntry = {
               at: Date.now(),
               elapsedMs,
-              score: scoreOf(session.results),
+              score,
               total: session.results.length,
               config,
             };
@@ -709,26 +805,32 @@ export default function NoteTrainer() {
             setLastElapsedMs(elapsedMs);
             setIsNewBest(elapsedMs < previousBest);
           }
-          setSummary({ results: session.results, notes: session.notes });
-          setNote(null);
-          setNextNote(null);
+          setSummary({ results: session.results, rounds: session.rounds });
+          setRound(null);
+          setNextRound(null);
           endSession();
           return;
         }
         session.index++;
-        // A held note ringing on shouldn't be graded against the next target; wait for it to
-        // stop (silence, or a pitch that isn't this one) before grading resumes.
-        session.previousMidi =
-          session.target !== null ? parseNote(session.target) : null;
+        // A held note ringing on shouldn't be graded against the next round's first note; wait
+        // for it to stop (silence, or a pitch that isn't this one) before grading resumes.
+        session.previousMidi = session.round
+          ? parseNote(session.round.notes[session.round.notes.length - 1])
+          : null;
         session.settled = session.previousMidi === null;
+        session.lastCorrectMidi = null;
         session.best = null;
-        session.wrongPlayed = false;
+        session.noteIndex = 0;
+        session.degreeMisses = 0;
+        session.hadMistake = false;
         session.stable = 0;
         session.last = null;
         setStatus(null);
         setHeard(null);
-        // Drill mode's total grows when a note gets requeued, so "X of Y" reflects what's
-        // actually left rather than staying fixed at the range size.
+        setScaleProgress(0);
+        setDegreeMiss(false);
+        // Drill mode's total grows when a scale gets requeued, so "X of Y" reflects what's
+        // actually left rather than staying fixed at the pool size.
         setProgress(
           drilling
             ? {
@@ -739,38 +841,37 @@ export default function NoteTrainer() {
         );
       }
 
-      let next: string;
-      let following: string | null;
+      let next: ScaleRound;
+      let following: ScaleRound | null;
       if (drilling && session) {
         next = session.queue.shift()!;
         following = session.queue[0] ?? null;
         upcomingRef.current = null;
       } else {
-        next = upcomingRef.current ?? randomNoteInRange(range);
+        next = upcomingRef.current ?? randomScaleRound(range, randomMode(pool));
         const isLast = session ? session.index >= session.total : false;
-        following = isLast ? null : randomNoteInRange(range);
+        following = isLast ? null : randomScaleRound(range, randomMode(pool));
         upcomingRef.current = following;
       }
-      if (session) session.target = next;
-      noteSeedRef.current++;
-      setNoteSeed(noteSeedRef.current);
+      if (session) {
+        session.round = next;
+        session.noteIndex = 0;
+      }
+      roundSeedRef.current++;
+      setRoundSeed(roundSeedRef.current);
       noteTimerRef.current = {
         startedAt: performance.now(),
         durationMs: seconds * 1000,
       };
-      setNote(next);
-      setNextNote(following);
+      setRound(next);
+      setNextRound(following);
       if (playSoundRef.current && !session) {
-        playNote(
-          next,
-          Math.min(NOTE_DURATION_SECONDS, seconds),
-          toneIdRef.current,
-        );
+        playScaleSound(next.notes);
       }
     };
 
-    // Moving on early (a correct note, or the skip button) restarts the timer so the next
-    // note gets its own full max time rather than continuing on the old note's schedule.
+    // Moving on early (a finished scale, or the skip button) restarts the timer so the next
+    // round gets its own full max time rather than continuing on the old round's schedule.
     skipRef.current = () => {
       advance();
       if (sessionRef.current) {
@@ -787,35 +888,31 @@ export default function NoteTrainer() {
 
   useSpaceToggle(running ? stop : () => void start());
 
-  // With "Ignore octave" on, the octave number is left out everywhere notes are shown — except
-  // during (or just after) a "Shed a string" session, which always shows it.
-  const noteLabel = (n: string, seq = 0) =>
-    spellNote(n, accidentalStyle, seq, effectiveIgnoreOctave);
-  const mainLabel = note ? noteLabel(note, noteSeed) : "—";
-  // "Both" spellings (e.g. "C#/Db") is wider than a single note name, so it needs to shrink
-  // to still fit inside the circle.
-  const mainLabelIsDouble = mainLabel.includes("/");
+  const rootLabel = (r: ScaleRound, seq = 0) =>
+    spellNote(midiToNote(r.rootMidi), accidentalStyle, seq, ignoreOctave);
+  const roundLabel = (r: ScaleRound, seq = 0) =>
+    `${rootLabel(r, seq)} ${r.mode.label}`;
+  const mainLabel = round ? roundLabel(round, roundSeed) : "—";
+  const mainLabelLong = mainLabel.length > 16;
   const glow = running && status ? GRADE_COLOR[status] : null;
-  // The countdown ring only makes sense while a timer is actually running down.
-  // A max-time timer now always runs while a session is active, even in "next note when
-  // correct" mode, so the ring can just track `running`.
   const showCountdown = running;
   const score = summary ? scoreOf(summary.results) : 0;
   const tally = (grade: Grade) =>
     summary?.results.filter((g) => g === grade).length ?? 0;
   const currentConfig: HistoryConfig = {
     rangeInput,
-    ignoreOctave,
     drillMode,
-    requeuePartials,
-    noteCount,
+    scaleCount,
+    scaleModesKey: pool
+      .map((m) => m.id)
+      .sort()
+      .join(","),
     accidentalStyle,
     intervalSeconds,
     toleranceCents,
     holdMs,
     advanceDelayMs,
     refA,
-    partialCredit,
     sensitivity,
   };
   const matchingHistory = history.filter((h) =>
@@ -824,16 +921,11 @@ export default function NoteTrainer() {
   const bestMs = matchingHistory.length
     ? Math.min(...matchingHistory.map((h) => h.elapsedMs))
     : null;
-  const weakEntries = rankWeak(settings.noteStats);
-  const parsedRange = parseRange(rangeInput);
-  const weakCountInRange = parsedRange
-    ? weakNotesInRange(settings.noteStats, parsedRange).length
-    : 0;
+  const weakEntries = weakScaleEntries(settings.scaleStats);
 
   return (
     <ToolLayout
-      title="Note Trainer"
-      credit="Idea by Rob Moreno"
+      title="Scale Trainer"
       sidePanelLabel="History"
       sidePanel={
         listenMode && (
@@ -903,7 +995,7 @@ export default function NoteTrainer() {
             <CollapsiblePanel id="struggles" title="Struggles" icon={FlagIcon}>
               {weakEntries.length === 0 ? (
                 <p className="text-sm text-muted">
-                  No struggles tracked yet — a wrong or partial note in listen mode adds it here.
+                  No struggles tracked yet — a wrong or partial scale in listen mode adds it here.
                 </p>
               ) : (
                 <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
@@ -912,10 +1004,10 @@ export default function NoteTrainer() {
                       key={entry.key}
                       className="flex items-center justify-between gap-3 border-b border-background/70 py-2 text-sm last:border-b-0"
                     >
-                      <span className="font-medium tabular-nums">
-                        {noteLabel(entry.key)}
+                      <span className="font-medium">
+                        {pitchClassLabel(entry.pitchClass)} {entry.mode.label}
                       </span>
-                      <span className="flex items-center gap-2 text-xs tabular-nums">
+                      <span className="flex shrink-0 items-center gap-2 text-xs tabular-nums">
                         {entry.counts.incorrect > 0 && (
                           <span style={{ color: GRADE_COLOR.incorrect }}>
                             ✕{entry.counts.incorrect}
@@ -936,16 +1028,16 @@ export default function NoteTrainer() {
               )}
               <button
                 type="button"
-                onClick={() => void start({ kind: "weak" })}
-                disabled={running || weakCountInRange === 0}
+                onClick={() => void start("weak")}
+                disabled={running || weakEntries.length === 0}
                 className="self-start rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
               >
-                Shed weak notes{weakCountInRange > 0 && ` (${weakCountInRange})`}
+                Shed weak scales{weakEntries.length > 0 && ` (${weakEntries.length})`}
               </button>
               {weakEntries.length > 0 && (
                 <button
                   type="button"
-                  onClick={clearNoteStats}
+                  onClick={clearScaleStats}
                   disabled={running}
                   className="self-start text-sm font-medium text-muted hover:text-danger disabled:opacity-50"
                 >
@@ -959,13 +1051,74 @@ export default function NoteTrainer() {
       options={
         <>
           <PanelsToggle ids={PANEL_IDS} />
-          <CollapsiblePanel id="notes" title="Notes" icon={NoteIcon}>
+          <CollapsiblePanel id="scale-modes" title="Scales" icon={ScaleIcon}>
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-muted">
+                {pool.length} of {SCALE_MODES.length} selected
+              </span>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateSettings({ scaleModes: SCALE_MODES.map((m) => m.id) })
+                  }
+                  disabled={running}
+                  className="font-medium text-accent hover:underline disabled:opacity-50"
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateSettings({ scaleModes: [] })}
+                  disabled={running}
+                  className="font-medium text-muted hover:underline disabled:opacity-50"
+                >
+                  None
+                </button>
+              </div>
+            </div>
+            <Hint>Which scale modes can be picked for a round. At least one must stay selected.</Hint>
+
+            {SCALE_CATEGORIES.map((category) => (
+              <div key={category} className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  {category}
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {SCALE_MODES.filter((m) => m.category === category).map(
+                    (mode) => {
+                      const selected = settings.scaleModes.includes(mode.id);
+                      return (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          aria-pressed={selected}
+                          title={mode.aka}
+                          onClick={() => toggleScaleMode(mode.id)}
+                          disabled={running}
+                          className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${
+                            selected
+                              ? "bg-accent text-accent-foreground"
+                              : "bg-background text-foreground hover:bg-surface-hover"
+                          }`}
+                        >
+                          {mode.label}
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
+              </div>
+            ))}
+          </CollapsiblePanel>
+
+          <CollapsiblePanel id="scale-range" title="Range" icon={NoteIcon}>
             <SwitchRow
               label="Ignore octave"
               checked={ignoreOctave}
-              onChange={(checked) => updateSettings({ ignoreOctave: checked })}
+              onChange={setIgnoreOctave}
               disabled={running}
-              hint="Collapses the note pool to one octave (12 notes) and, in listen mode, accepts the right note in any octave."
+              hint="Hides the octave number (e.g. C Dorian instead of C4 Dorian) and accepts the scale played in any octave."
             />
 
             <label className="flex flex-col gap-1 text-sm">
@@ -984,7 +1137,7 @@ export default function NoteTrainer() {
               <Select
                 value={instrumentId}
                 onChange={setInstrumentId}
-                disabled={running || ignoreOctave}
+                disabled={running}
                 options={[
                   ...INSTRUMENTS.map((instrument) => ({
                     value: instrument.id,
@@ -994,9 +1147,9 @@ export default function NoteTrainer() {
                 ]}
               />
             </label>
-            <Hint>Sets the range notes are drawn from, to match what you&apos;re practicing on.</Hint>
+            <Hint>Sets the range roots are drawn from, to match what you&apos;re practicing on.</Hint>
 
-            {isCustom && !ignoreOctave && (
+            {isCustom && (
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-muted">Custom range</span>
                 <input
@@ -1009,33 +1162,8 @@ export default function NoteTrainer() {
                 />
               </label>
             )}
-            {isCustom && !ignoreOctave && (
-              <Hint>The lowest and highest notes to draw from, e.g. A1-A6.</Hint>
-            )}
-
-            {instrument?.strings && (
-              <div className="flex flex-col gap-2 text-sm">
-                <span className="font-medium text-muted">Shed a string</span>
-                <div className="flex flex-wrap gap-2">
-                  {instrument.strings.map((openNote, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => void start({ kind: "string", stringIndex: i })}
-                      disabled={running}
-                      className="rounded-lg bg-background px-3 py-1.5 text-sm font-medium tabular-nums hover:bg-surface-hover disabled:opacity-50"
-                    >
-                      {spellNote(openNote, accidentalStyle, i, false)}
-                    </button>
-                  ))}
-                </div>
-                <Hint>
-                  Starts a listen-mode session on every note of just that string — its open note
-                  up to two octaves above it (or the top of {instrument.label}&apos;s range, if
-                  that&apos;s lower) — always shown and graded with the octave, regardless of
-                  Ignore octave above.
-                </Hint>
-              </div>
+            {isCustom && (
+              <Hint>The lowest and highest notes to draw scale roots from, e.g. A1-A6.</Hint>
             )}
 
             {/* In listen mode this becomes "Max time", shown in the Listen mode section instead. */}
@@ -1049,13 +1177,13 @@ export default function NoteTrainer() {
                 step={0.5}
                 disabled={running}
                 onChange={setIntervalSeconds}
-                hint="How long each note stays on screen before the next one shows."
+                hint="How long each scale stays on screen before the next one shows."
               />
             )}
           </CollapsiblePanel>
 
           <CollapsiblePanel
-            id="note-listen"
+            id="scale-listen"
             title="Listen mode"
             icon={MicIcon}
             toggle={{
@@ -1073,18 +1201,18 @@ export default function NoteTrainer() {
               step={0.5}
               disabled={running}
               onChange={setIntervalSeconds}
-              hint="How long you have to play each note before it's marked a miss and moves on."
+              hint="How long you have to finish playing each scale before it's marked a miss and moves on."
             />
 
             <AdvancedSlider
-              label="Time between notes"
+              label="Time between scales"
               value={advanceDelayMs / 1000}
               unit="s"
               min={MIN_ADVANCE_DELAY_MS / 1000}
               max={MAX_ADVANCE_DELAY_MS / 1000}
               step={0.25}
               disabled={running}
-              hint="How long the graded note (with its countdown ring) stays on screen before the next one starts."
+              hint="How long the graded scale (with its countdown ring) stays on screen before the next one starts."
               onChange={(v) => updateSettings({ advanceDelayMs: Math.round(v * 1000) })}
             />
 
@@ -1093,51 +1221,43 @@ export default function NoteTrainer() {
               checked={soundFeedback}
               onChange={setSoundFeedback}
               disabled={running}
-              hint="A click each second of the countdown, plus a click the instant a note is graded."
+              hint="A click each second of the countdown, plus a click the instant a scale is graded."
             />
 
             <SwitchRow
-              label="Drill every note"
+              label="Drill every scale"
               checked={drillMode}
               onChange={setDrillMode}
               disabled={!listenMode || running}
-              hint="Plays every note in the range once, in a random order, instead of a fixed count."
+              hint="Plays every selected scale in all 12 keys, each in a random octave."
             />
 
-            {drillMode ? (
-              <SwitchRow
-                label="Revisit partials"
-                checked={requeuePartials}
-                onChange={setRequeuePartials}
-                disabled={!listenMode || running}
-                hint="A note you got right after a wrong attempt goes back on the end of the queue too, not just full misses."
-              />
-            ) : (
+            {!drillMode && (
               <label className="flex flex-col gap-2 text-sm">
                 <span className="flex items-center justify-between font-medium text-muted">
-                  Number of notes
+                  Number of scales
                   <span className="tabular-nums text-foreground">
-                    {noteCount}
+                    {scaleCount}
                   </span>
                 </span>
                 <input
                   type="range"
-                  min={MIN_NOTE_COUNT}
-                  max={MAX_NOTE_COUNT}
+                  min={MIN_SCALE_COUNT}
+                  max={MAX_SCALE_COUNT}
                   step={1}
-                  value={noteCount}
-                  onChange={(e) => setNoteCount(Number(e.target.value))}
+                  value={scaleCount}
+                  onChange={(e) => setScaleCount(Number(e.target.value))}
                   disabled={running || !listenMode}
                   style={
                     {
-                      "--progress": `${((noteCount - MIN_NOTE_COUNT) / (MAX_NOTE_COUNT - MIN_NOTE_COUNT)) * 100}%`,
+                      "--progress": `${((scaleCount - MIN_SCALE_COUNT) / (MAX_SCALE_COUNT - MIN_SCALE_COUNT)) * 100}%`,
                     } as React.CSSProperties
                   }
                   className="slider h-6 w-full cursor-pointer disabled:cursor-default disabled:opacity-60"
                 />
               </label>
             )}
-            {!drillMode && <Hint>How many random notes make up one session.</Hint>}
+            {!drillMode && <Hint>How many random scales make up one session.</Hint>}
 
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-muted">Audio input</span>
@@ -1212,13 +1332,18 @@ export default function NoteTrainer() {
               </label>
               <Hint>How quiet a signal can be before it&apos;s treated as silence — raise it in a noisy room.</Hint>
               <SwitchRow
-                label="Half credit after a wrong note"
+                label="Partial credit"
                 checked={partialCredit}
-                onChange={(checked) =>
-                  updateSettings({ partialCredit: checked })
-                }
+                onChange={setPartialCredit}
                 disabled={running || !listenMode}
-                hint="A wrong note played before the right one still counts, but only for half credit instead of a full point."
+                hint="A wrong note gets one retry; missing it twice fails the scale instead of failing on the first miss."
+              />
+              <SwitchRow
+                label="Ignore repeated notes"
+                checked={ignoreRepeatedNotes}
+                onChange={setIgnoreRepeatedNotes}
+                disabled={running || !listenMode}
+                hint="A fresh attack of the note you just played (e.g. a double pluck, or playing C then C again instead of D) is ignored instead of graded as wrong."
               />
               <button
                 type="button"
@@ -1229,6 +1354,7 @@ export default function NoteTrainer() {
                     refA: DEFAULT_SETTINGS.refA,
                     sensitivity: DEFAULT_SETTINGS.sensitivity,
                     partialCredit: DEFAULT_SETTINGS.partialCredit,
+                    ignoreRepeatedNotes: DEFAULT_SETTINGS.ignoreRepeatedNotes,
                   })
                 }
                 disabled={running}
@@ -1240,23 +1366,30 @@ export default function NoteTrainer() {
           </CollapsiblePanel>
 
           <CollapsiblePanel
-            id="note-sound"
+            id="scale-sound"
             title="Sound & display"
             icon={SlidersIcon}
           >
             <SwitchRow
-              label="Play note out loud"
+              label="Play scale out loud"
               checked={playSound && !listenMode}
               onChange={setPlaySound}
               disabled={listenMode}
-              hint="Sounds each note when it appears, so you can hear it as well as see its name. Not available in listen mode."
+              hint="Plays each note of the scale in order as it appears. Not available in listen mode."
             />
 
             <SwitchRow
-              label="Show next note"
+              label="Show next scale"
               checked={showNext}
               onChange={setShowNext}
-              hint="Shows a preview of the upcoming note next to the current one."
+              hint="Shows a preview of the upcoming scale next to the current one."
+            />
+
+            <SwitchRow
+              label="Show scale notes"
+              checked={showScaleNotes}
+              onChange={setShowScaleNotes}
+              hint="The row of note pills below the circle in listen mode, showing progress through the scale."
             />
 
             <label className="flex flex-col gap-1 text-sm">
@@ -1271,16 +1404,16 @@ export default function NoteTrainer() {
                 }))}
               />
             </label>
-            <Hint>Which sound plays notes out loud.</Hint>
+            <Hint>Which sound plays a scale out loud.</Hint>
           </CollapsiblePanel>
         </>
       }
     >
-      <div className="flex flex-col items-center gap-2">
-        {status && running && listenMode && (
+      <div className="flex flex-col items-center gap-3">
+        {status && running && (
           <div className="flex flex-col items-center gap-0.5">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-              Next note in
+              Next scale in
             </span>
             <span
               className="text-3xl font-bold tabular-nums sm:text-4xl"
@@ -1291,13 +1424,12 @@ export default function NoteTrainer() {
           </div>
         )}
         <div className="relative">
-          <div className="relative flex h-40 w-40 items-center justify-center sm:h-48 sm:w-48">
+          <div className="relative flex h-44 w-44 items-center justify-center p-4 text-center sm:h-56 sm:w-56">
             <CountdownRing active={showCountdown} timerRef={noteTimerRef} />
             <h1
-              className={`relative z-10 font-bold tabular-nums transition-[color,text-shadow] duration-200 ${
-                mainLabelIsDouble
-                  ? "text-3xl sm:text-4xl"
-                  : "text-6xl sm:text-7xl"
+              title={round?.mode.aka}
+              className={`relative z-10 font-bold transition-[color,text-shadow] duration-200 ${
+                mainLabelLong ? "text-xl sm:text-2xl" : "text-3xl sm:text-4xl"
               }`}
               style={
                 glow
@@ -1311,19 +1443,56 @@ export default function NoteTrainer() {
               {mainLabel}
             </h1>
           </div>
-          {showNext && nextNote && running && (
+          {showNext && nextRound && running && (
             <span
-              aria-label={`Next note ${noteLabel(nextNote, noteSeed + 1)}`}
-              className="absolute bottom-1 left-full ml-3 text-xl font-semibold tabular-nums text-muted sm:text-2xl"
+              aria-label={`Next scale ${roundLabel(nextRound, roundSeed + 1)}`}
+              className="absolute bottom-1 left-full ml-3 max-w-[9rem] text-sm font-semibold text-muted sm:text-base"
             >
-              {noteLabel(nextNote, noteSeed + 1)}
+              {roundLabel(nextRound, roundSeed + 1)}
             </span>
           )}
         </div>
+
+        {listenMode && running && round && showScaleNotes && (
+          <div className="flex flex-wrap justify-center gap-1.5 px-2">
+            {round.notes.map((n, i) => {
+              const label = spellNote(n, accidentalStyle, roundSeed, true);
+              const matched = i < scaleProgress;
+              const failed = i === scaleProgress && status === "incorrect";
+              // Missed once and waiting for a retry (partial-credit mode only).
+              const retrying = i === scaleProgress && degreeMiss && !failed;
+              const current = i === scaleProgress && !matched && !failed && !retrying;
+              const color = matched
+                ? GRADE_COLOR.correct
+                : failed
+                  ? GRADE_COLOR.incorrect
+                  : retrying
+                    ? GRADE_COLOR.partial
+                    : undefined;
+              return (
+                <span
+                  key={i}
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums transition-colors ${
+                    current ? "ring-2 ring-accent" : ""
+                  }`}
+                  style={{
+                    color,
+                    background: color
+                      ? `color-mix(in srgb, ${color} 15%, transparent)`
+                      : undefined,
+                  }}
+                >
+                  {label}
+                </span>
+              );
+            })}
+          </div>
+        )}
+
         {running && progress && (
           <div className="flex flex-col items-center gap-0.5 text-sm text-muted">
             <span className="tabular-nums">
-              Note {progress.index} of {progress.total}
+              Scale {progress.index} of {progress.total}
               {" · "}
               <ElapsedTimer active={running} startRef={sessionStartRef} />
             </span>
@@ -1336,7 +1505,7 @@ export default function NoteTrainer() {
                 onClick={() => skipRef.current?.()}
                 className="mt-2 rounded-full bg-surface px-4 py-1.5 text-sm font-medium text-foreground hover:bg-surface-hover"
               >
-                Skip note
+                Skip scale
               </button>
             )}
           </div>
@@ -1397,24 +1566,24 @@ export default function NoteTrainer() {
           </div>
 
           <div className="flex flex-wrap gap-1.5">
-            {summary.notes.map((n, i) => (
+            {summary.rounds.map((r, i) => (
               <span
                 key={i}
                 title={GRADE_LABEL[summary.results[i]]}
-                className="rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums"
+                className="rounded-full px-2.5 py-1 text-xs font-semibold"
                 style={{
                   color: GRADE_COLOR[summary.results[i]],
                   background: `color-mix(in srgb, ${GRADE_COLOR[summary.results[i]]} 15%, transparent)`,
                 }}
               >
-                {noteLabel(n, i)}
+                {roundLabel(r, i)}
               </span>
             ))}
           </div>
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => void start(lastRequest)}
+              onClick={() => void start(lastMode)}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground hover:bg-accent-hover"
             >
               Try again

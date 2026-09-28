@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState } from "react";
 import { Oswald } from "next/font/google";
 import {
   formatComposer,
@@ -265,10 +266,51 @@ function BarContent({ bar }: { bar: Bar }) {
     return <span className="text-muted">&nbsp;</span>;
   }
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
+    <FitChordRow>
       {slots.map((slot, i) => (
         <ChordLabel key={i} slot={slot} />
       ))}
+    </FitChordRow>
+  );
+}
+
+/** Keeps a bar's chords on one line no matter how many there are: never wraps, and instead
+    horizontally compresses the whole row (`transform: scaleX()`, which only affects width — the
+    text's height, and everything else about it, stays exactly as sized) by just enough that it
+    stops overflowing the bar. Renders at natural size (no transform) until it actually doesn't
+    fit. */
+function FitChordRow({ children }: { children: React.ReactNode }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const content = contentRef.current;
+    if (!wrap || !content) return;
+    const recompute = () => {
+      // scrollWidth/clientWidth reflect layout size, not any transform already applied, so this
+      // stays accurate (and doesn't feed back on itself) however much the row is currently scaled.
+      const available = wrap.clientWidth;
+      const natural = content.scrollWidth;
+      setScale(available > 0 && natural > 0 ? Math.min(1, available / natural) : 1);
+    };
+    recompute();
+    const observer = new ResizeObserver(recompute);
+    observer.observe(wrap);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={wrapRef} className="flex w-full justify-center overflow-hidden">
+      <div
+        ref={contentRef}
+        className="flex items-center gap-x-2 whitespace-nowrap"
+        style={scale < 1 ? { transform: `scaleX(${scale})`, transformOrigin: "center" } : undefined}
+      >
+        {children}
+      </div>
     </div>
   );
 }

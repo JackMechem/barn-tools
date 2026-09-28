@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Hint from "@/components/Hint";
 import NumberField from "@/components/NumberField";
 import Select from "@/components/Select";
 import type { BeatLevel } from "@/lib/clickEngine";
@@ -65,6 +66,7 @@ export function SteppedField({
   max,
   disabled,
   layout = "stack",
+  hint,
   onChange,
 }: {
   label: string;
@@ -73,6 +75,7 @@ export function SteppedField({
   max: number;
   disabled?: boolean;
   layout?: "stack" | "row";
+  hint?: string;
   onChange: (value: number) => void;
 }) {
   const increase = (
@@ -124,6 +127,7 @@ export function SteppedField({
           {decrease}
         </>
       )}
+      {hint && <Hint>{hint}</Hint>}
     </div>
   );
 }
@@ -134,9 +138,11 @@ export function SteppedField({
  */
 export function BeatUnitField({
   value,
+  hint,
   onChange,
 }: {
   value: number;
+  hint?: string;
   onChange: (value: number) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
@@ -197,6 +203,7 @@ export function BeatUnitField({
       >
         −
       </button>
+      {hint && <Hint>{hint}</Hint>}
     </div>
   );
 }
@@ -443,8 +450,13 @@ export function MeterOptions({
           min={1}
           max={MAX_BEATS}
           onChange={onChangeBeats}
+          hint="How many beats make up one bar."
         />
-        <BeatUnitField value={beatUnit} onChange={onSetBeatUnit} />
+        <BeatUnitField
+          value={beatUnit}
+          onChange={onSetBeatUnit}
+          hint="Which note value counts as one beat, e.g. 4 for quarter notes, 8 for eighths."
+        />
       </div>
 
       <label className="flex flex-col gap-1 text-sm">
@@ -455,6 +467,10 @@ export function MeterOptions({
           onApply={onApplyGroups}
         />
       </label>
+      <Hint>
+        How the bar is split into accented groups, e.g. 3+2+2 for a bar that feels like three
+        uneven groups. Must add up to the number of beats per bar.
+      </Hint>
 
       <div className="flex flex-col gap-2 text-sm">
         <span id="subdivision-label" className="font-medium text-muted">
@@ -487,6 +503,7 @@ export function MeterOptions({
             );
           })}
         </div>
+        <Hint>Splits each beat into extra clicks, e.g. straight eighths or triplets.</Hint>
       </div>
     </>
   );
@@ -510,6 +527,7 @@ export function SoundOptions({
         <span className="font-medium text-muted">Tone</span>
         <Select value={soundId} onChange={setSoundId} options={SOUND_OPTIONS} />
       </label>
+      <Hint>Which click sound the metronome plays.</Hint>
 
       <label className="flex flex-col gap-2 text-sm">
         <span className="flex items-center justify-between font-medium text-muted">
@@ -529,6 +547,7 @@ export function SoundOptions({
           className="slider h-6 w-full cursor-pointer"
         />
       </label>
+      <Hint>How loud the click plays.</Hint>
     </>
   );
 }

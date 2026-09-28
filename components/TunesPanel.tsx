@@ -122,6 +122,7 @@ export default function TunesPanel({
           label="Pick from all jazz standards"
           checked={pickFromStandards}
           onChange={onPickFromStandardsChange}
+          hint="Draws from the ~630 built-in jazz standards instead of your own tune list below."
         />
 
         {tunes.length === 0 ? (

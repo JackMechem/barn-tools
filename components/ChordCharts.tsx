@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ChordChart from "@/components/ChordChart";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import Hint from "@/components/Hint";
 import Select from "@/components/Select";
 import ToolLayout from "@/components/ToolLayout";
 import {
@@ -196,12 +197,12 @@ export default function ChordCharts() {
             title="Import a playlist"
             icon={BookIcon}
           >
-            <p className="text-left text-xs text-muted">
+            <Hint>
               On iRealPro.com, open a playlist from the forums and copy its link
               (it starts with{" "}
               <code className="rounded bg-background px-1">irealb://</code>).
               Paste it below, or choose a text file it was saved to.
-            </p>
+            </Hint>
             <textarea
               value={linkText}
               onChange={(e) => setLinkText(e.target.value)}
@@ -261,6 +262,7 @@ export default function ChordCharts() {
                 className="min-w-20"
               />
             </label>
+            <Hint>How many bars are shown per line before wrapping to the next.</Hint>
           </CollapsiblePanel>
         </div>
 

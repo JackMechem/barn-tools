@@ -2,6 +2,19 @@ import { midiToNote, parseNote } from "@/lib/noteRange";
 
 export type Grade = "correct" | "partial" | "incorrect";
 
+/** Shared by every trainer that shows a correct/partial/incorrect result (Note Trainer, Scale
+    Trainer): the color and label for each grade. */
+export const GRADE_COLOR: Record<Grade, string> = {
+  correct: "#22c55e",
+  partial: "#f59e0b",
+  incorrect: "#ef4444",
+};
+export const GRADE_LABEL: Record<Grade, string> = {
+  correct: "Correct",
+  partial: "Partial",
+  incorrect: "Incorrect",
+};
+
 const RANK: Record<Grade, number> = { incorrect: 0, partial: 1, correct: 2 };
 
 export function betterGrade(a: Grade | null, b: Grade): boolean {

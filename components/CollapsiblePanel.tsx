@@ -1,5 +1,7 @@
 "use client";
 
+import { HelpIcon } from "@/components/tools";
+import { HintsContext } from "@/lib/hints";
 import { PANEL_DEFAULTS, panelKey } from "@/lib/panels";
 import { usePersistedSettings } from "@/lib/usePersistedSettings";
 
@@ -24,7 +26,10 @@ export default function CollapsiblePanel({
   toggle?: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean };
   children: React.ReactNode;
 }) {
-  const [{ open: storedOpen }, update] = usePersistedSettings(panelKey(id), PANEL_DEFAULTS);
+  const [{ open: storedOpen, showHints }, update] = usePersistedSettings(
+    panelKey(id),
+    PANEL_DEFAULTS,
+  );
   const canExpand = !toggle || toggle.checked;
   const open = canExpand && storedOpen;
   const bodyId = `panel-${id}`;
@@ -41,6 +46,20 @@ export default function CollapsiblePanel({
         >
           <Icon className="h-4 w-4 shrink-0" />
           {title}
+        </button>
+        <button
+          type="button"
+          aria-pressed={showHints}
+          aria-label={showHints ? "Hide option descriptions" : "Show option descriptions"}
+          title={showHints ? "Hide option descriptions" : "Show option descriptions"}
+          onClick={() => update({ showHints: !showHints })}
+          className={`mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent ${
+            showHints
+              ? "bg-accent text-accent-foreground"
+              : "text-muted hover:bg-background hover:text-foreground"
+          }`}
+        >
+          <HelpIcon className="h-4 w-4" />
         </button>
         {toggle && (
           <button
@@ -97,7 +116,9 @@ export default function CollapsiblePanel({
         }`}
       >
         <div className="overflow-hidden">
-          <div className="flex flex-col gap-4 px-4 pb-4 sm:px-6 sm:pb-6">{children}</div>
+          <div className="flex flex-col gap-4 px-4 pb-4 sm:px-6 sm:pb-6">
+            <HintsContext.Provider value={showHints}>{children}</HintsContext.Provider>
+          </div>
         </div>
       </div>
     </section>

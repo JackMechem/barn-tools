@@ -52,6 +52,7 @@ export default function ToolLayout({
   help,
   sidePanel,
   sidePanelLabel,
+  credit,
   children,
 }: {
   title: string;
@@ -66,6 +67,8 @@ export default function ToolLayout({
   sidePanel?: React.ReactNode;
   /** What to call the side panel on its show/hide buttons (e.g. "History"). */
   sidePanelLabel?: string;
+  /** Small, unobtrusive text pinned to the bottom-right corner of the page (e.g. an idea credit). */
+  credit?: React.ReactNode;
   options: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -85,6 +88,12 @@ export default function ToolLayout({
           {help && <div className="ml-3">{help}</div>}
           {titleExtra && <div className="ml-4 pr-4">{titleExtra}</div>}
         </div>
+
+        {credit && (
+          <p className="pointer-events-none fixed bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] right-[calc(env(safe-area-inset-right)+0.75rem)] z-10 text-xs text-muted/70">
+            {credit}
+          </p>
+        )}
 
         {stacked ? (
           <main className="flex w-full flex-1 flex-col gap-6 px-4 pb-6 pt-[calc(env(safe-area-inset-top)+4.5rem)] sm:px-6 lg:pt-16">
