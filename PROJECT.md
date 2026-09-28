@@ -53,6 +53,23 @@ persist in the browser via localStorage / IndexedDB, not on a server.
   (`lib/audioInput.ts`, `lib/pitchDetect.ts`, `lib/noteGrade.ts`) that listens through the
   microphone and grades correct/partial/incorrect, with a countdown ring and adjustable max-time
   per note.
+- **Chord Charts** (`components/ChordCharts.tsx`, `components/ChordChart.tsx`,
+  `lib/iRealPro.ts`) — paste an iReal Pro playlist link (the `irealb://...` links shared on the
+  iReal Pro forums) and read its charts, styled to match the site. The link's chord data is
+  scrambled/compressed in an undocumented way; `ireal-reader` (npm, MIT — the one non-audio
+  runtime dependency in this repo) handles that part and splits the playlist into songs, but its
+  own `measures` output _expands_ repeats/endings into one flattened, played-through list, which
+  is right for playback but wrong for display. So `lib/iRealPro.ts` doesn't use that — it walks
+  the same un-scrambled `raw` chart string itself (same token grammar: `*A` section letters,
+  `{`/`}` repeat barlines, `N1`/`N2` endings, `<...>` directions like "D.C. al Coda", `XyQ` layout
+  padding, a chord-token regex) to build a chart model that keeps the notation as written once,
+  with repeat signs and ending brackets, instead of expanding it. Imported songs (title, composer,
+  style, key, and the parsed bar list) persist in localStorage across playlists you paste in,
+  de-duplicated by title/composer/key; "bars per row" is a display setting, not part of the parsed
+  data. Verified by running the whole parser over a real ~1,460-song forum playlist (`node
+--experimental-strip-types`, not committed) — no exceptions, no malformed chords, ~4.5MB of
+  JSON for that whole playlist (comfortably under typical localStorage limits, but worth knowing
+  if several large playlists get imported).
 - **Slow Downer** — load a local audio/video file, slow playback without pitch shift, loop
   sections, add named markers with notes, zoom/pan the waveform.
 - **Recorder** — multitrack recording: per-track clips, punch-in recording, trim/crop/repeat/move

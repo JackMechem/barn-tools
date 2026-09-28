@@ -315,6 +315,15 @@ export function MetricModulationIcon({ className }: { className?: string }) {
   );
 }
 
+export function ChordChartIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 10h18M9 10v10M15 10v10" />
+    </svg>
+  );
+}
+
 export function HomeIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>
@@ -376,6 +385,14 @@ export const NAV_LINKS = [
       "Load a song, slow it down without changing pitch and loop the tricky parts.",
     icon: WaveIcon,
     category: "Audio" as Category,
+  },
+  {
+    href: "/chord-charts",
+    label: "Chord Charts",
+    description:
+      "Import iReal Pro playlists and read the chord charts, styled to match the rest of the site.",
+    icon: ChordChartIcon,
+    category: "Practice" as Category,
   },
   {
     href: "/recorder",
