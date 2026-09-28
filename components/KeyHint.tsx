@@ -6,9 +6,10 @@ function Kbd({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Small keyboard-shortcut hint shown under a page's main button. */
+/** Small keyboard-shortcut hint shown under a page's main button. Hidden on mobile, since
+    there's no physical keyboard to press the shortcut on. */
 export default function KeyHint({ children }: { children: React.ReactNode }) {
-  return <p className="-mt-4 text-xs text-muted">{children}</p>;
+  return <p className="-mt-4 hidden text-xs text-muted sm:block">{children}</p>;
 }
 
 KeyHint.Key = Kbd;

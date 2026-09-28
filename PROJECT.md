@@ -28,6 +28,25 @@ persist in the browser via localStorage / IndexedDB, not on a server.
   standards (`lib/standards.ts`).
 - **Metronome** — configurable time signature (including odd/custom meters), subdivisions,
   per-beat accents, tap tempo.
+- **Polyrhythm Metric Modulation Metronome** (`components/RandomMetricModulation.tsx`) — same click engine
+  and meter controls as Metronome, but every N bars it randomly jumps the tempo by a musical
+  ratio (3:2, 4:3, 2:1, etc. — `lib/metricModulation.ts`), bouncing to the ratio's inverse if
+  that would push the tempo out of range. Configurable bars-per-modulation (or "play until tempos
+  realign" — each `Modulation` carries an exact `num`/`den`, so e.g. a 3:2 jump auto-sets the
+  interval to 3 bars, the point where the new and reference tempos next share a downbeat), which
+  ratios are in the mix, whether to avoid repeating the same one twice, and an optional "return to
+  original tempo" mode that alternates modulate-away/return-home instead of drifting freely. Shows the
+  upcoming tempo ahead of time and logs each modulation for the run in a `ToolLayout` `sidePanel`
+  (see below). An optional second click (own tone, own mute, own `BeatIndicator`) runs the whole
+  time as a second track on the _same_ `startClickEngine` call (see below) so it can hear/see it
+  against whatever the main click has modulated to — pinned to the true starting tempo in "return
+  to original" mode, or otherwise always the tempo the main click just left (one modulation
+  behind). Each modulation carries an exact `num`/`den` (e.g. 3:2), so it also shows what the new
+  tempo's quarter note is worth in the reference tempo's note values where that reduces to a
+  single clean name (`describeQuarterEquivalence` in `lib/metricModulation.ts`; several ratios,
+  like 4:3, genuinely don't and show nothing). The modulation itself is applied from inside
+  `getSettings` (a param `startClickEngine` passes `(beat, sub)` into) rather than reacting to
+  `onBeat`, so it lands exactly on the bar line instead of one beat late.
 - **Tuner** — a Total-Energy-style circular note picker for a chromatic tuner + tone generator,
   with per-instrument string tunings.
 - **Note Trainer** — drills random notes in an instrument's range. Has a mic-based "listen mode"
@@ -50,13 +69,28 @@ persist in the browser via localStorage / IndexedDB, not on a server.
   hideable options column (the eye icon); `layout="stacked"` (Slow Downer, Recorder) is
   full-width with options in one card below. Takes `help={<HelpButton .../>}` for a controls
   dialog. The header icon next to the title is auto-picked from `NAV_LINKS` by matching the
-  title string, so a new tool's title must exactly match its `NAV_LINKS` label.
+  title string, so a new tool's title must exactly match its `NAV_LINKS` label. An optional
+  `sidePanel` (+ `sidePanelLabel`) adds a second, independently hide/show-able column on the
+  right (split layout only) — its own eye button, persisted via `useSidePanelHidden` in
+  `lib/panels.ts` — for things like Note Trainer's time-history panel or the modulation log.
+- `lib/meterControls.ts` + `components/MeterFields.tsx`: tempo/meter logic and UI shared by
+  Metronome and Polyrhythm Metric Modulation Metronome — the log-scaled BPM slider,
+  note-value-only beat unit,
+  accent grouping, subdivision picker, tap tempo, and the `TempoHero`/`MeterOptions`/
+  `SoundOptions` building blocks. Reuse these before adding another metronome-like tool.
+- `lib/clickEngine.ts`'s `startClickEngine` takes an array of tracks (`{getSettings, onBeat}`
+  each), all scheduled off one shared `setInterval` tick. Any tool playing more than one
+  simultaneous click (like Polyrhythm Metric Modulation Metronome's reference click) should
+  run them as tracks
+  on the _same_ `startClickEngine` call, not as separate calls — two independent calls each get
+  their own timer, and browser timer jitter can nudge one but not the other, so they slowly drift
+  apart even though the underlying Web Audio scheduling of each is individually sample-accurate.
 - `components/CollapsiblePanel.tsx` (split layout) / `components/OptionsCard.tsx` +
   `OptionSection` (stacked layout) for settings sections. `CollapsiblePanel` supports
   `toggle={{checked,onChange,disabled}}` to put a switch in the header that gates whether the
   section can expand.
   - **Hydration gotcha:** the chevron button in a gated `CollapsiblePanel` must always be
-    *rendered* (visually hidden with a CSS class like `invisible` when not expandable), never
+    _rendered_ (visually hidden with a CSS class like `invisible` when not expandable), never
     conditionally mounted/unmounted — the checked value comes from localStorage and can differ
     between the server default and the saved client value, and an element that's added/removed
     based on that will cause a real hydration mismatch. A class-only difference is fine.
@@ -86,6 +120,9 @@ from something that used to work:
 - Note Trainer listen mode: live pitch grading accuracy, the "ignore a held-over note" fix, the
   always-on max-time timer.
 - Tuner: the tone generator and the per-instrument string tunings.
+- Polyrhythm Metric Modulation Metronome: the bar-boundary detection driving each
+  modulation (relies on the
+  click engine's `onBeat` callback timing).
 
 ## Environment quirk (may not apply on a different machine)
 

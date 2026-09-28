@@ -48,3 +48,12 @@ export function useOptionsHidden(): [boolean, (hidden: boolean) => void] {
   const [{ hidden }, update] = usePersistedSettings(OPTIONS_KEY, OPTIONS_DEFAULTS);
   return [hidden, (next) => update({ hidden: next })];
 }
+
+const SIDE_PANEL_KEY = "jam-practice-side-panel";
+const SIDE_PANEL_DEFAULTS = { hidden: false };
+
+/** Same idea as `useOptionsHidden`, for the optional right-hand side panel. */
+export function useSidePanelHidden(): [boolean, (hidden: boolean) => void] {
+  const [{ hidden }, update] = usePersistedSettings(SIDE_PANEL_KEY, SIDE_PANEL_DEFAULTS);
+  return [hidden, (next) => update({ hidden: next })];
+}

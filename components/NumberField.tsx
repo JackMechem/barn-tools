@@ -9,12 +9,15 @@ export default function NumberField({
   max,
   onChange,
   label,
+  className,
 }: {
   value: number;
   min: number;
   max: number;
   onChange: (value: number) => void;
   label: string;
+  /** Overrides the default input styling (e.g. for a large, borderless hero number). */
+  className?: string;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? String(value);
@@ -42,9 +45,10 @@ export default function NumberField({
         setDraft(null);
         onChange(n);
       }}
-      className={`w-full rounded-lg bg-background px-3 py-2 tabular-nums outline-none focus:ring-2 focus:ring-accent ${
-        valid ? "" : "text-danger"
-      }`}
+      className={`${
+        className ??
+        "w-full rounded-lg bg-background px-3 py-2 tabular-nums outline-none focus:ring-2 focus:ring-accent"
+      } ${valid ? "" : "text-danger"}`}
     />
   );
 }

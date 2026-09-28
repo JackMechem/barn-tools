@@ -161,7 +161,15 @@ export function BarnLogo({ className }: { className?: string }) {
     >
       <path d="M6 30L32 8l26 22" />
       <path d="M11 26v30h42V26" />
-      <rect x="22" y="34" width="20" height="22" rx="1" fill="currentColor" fillOpacity="0.15" />
+      <rect
+        x="22"
+        y="34"
+        width="20"
+        height="22"
+        rx="1"
+        fill="currentColor"
+        fillOpacity="0.15"
+      />
       <path d="M22 34l20 22M42 34L22 56" />
       <path d="M32 26v.01" strokeWidth="5" />
     </svg>
@@ -297,6 +305,16 @@ export function ShuffleIcon({ className }: { className?: string }) {
   );
 }
 
+export function MetricModulationIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M8 21h8l-2.5-16h-3z" />
+      <path d="M12 17l3-7" />
+      <path d="M4 6l-2 2 2 2M20 6l2 2-2 2" />
+    </svg>
+  );
+}
+
 export function HomeIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>
@@ -306,51 +324,84 @@ export function HomeIcon({ className }: { className?: string }) {
   );
 }
 
+/** Groups tools in the sidebar and search; also fixes their display order. */
+export const CATEGORIES = ["Practice", "Timing & Tuning", "Audio"] as const;
+export type Category = (typeof CATEGORIES)[number];
+
 export const NAV_LINKS = [
   {
     href: "/jam-practice",
     label: "Jam Practice",
-    description: "Build a tune list, pick one at random and get counted in at the right tempo.",
+    description:
+      "Build a tune list, pick one at random and get counted in at the right tempo.",
     icon: ShuffleIcon,
-  },
-  {
-    href: "/metronome",
-    label: "Metronome",
-    description: "Any time signature, custom accents, subdivisions and tap tempo.",
-    icon: MetronomeIcon,
-  },
-  {
-    href: "/tuner",
-    label: "Tuner",
-    description: "Tune by ear or by mic with a tone generator, for strings, brass and reeds.",
-    icon: TunerIcon,
-  },
-  {
-    href: "/slow-downer",
-    label: "Slow Downer",
-    description: "Load a song, slow it down without changing pitch and loop the tricky parts.",
-    icon: WaveIcon,
-  },
-  {
-    href: "/recorder",
-    label: "Recorder",
-    description: "Record yourself, play it back with loops and markers, and export the audio.",
-    icon: RecordIcon,
-    /** Needs a desktop-sized screen; it's greyed out in the mobile menu. */
-    desktopOnly: true,
+    category: "Practice" as Category,
   },
   {
     href: "/note-trainer",
     label: "Note Trainer",
-    description: "Random notes in your instrument's range, with a listen mode that grades you.",
+    description:
+      "Random notes in your instrument's range, with a listen mode that grades you.",
     icon: NoteIcon,
+    category: "Practice" as Category,
+  },
+  {
+    href: "/metronome",
+    label: "Metronome",
+    description:
+      "Any time signature, custom accents, subdivisions and tap tempo.",
+    icon: MetronomeIcon,
+    category: "Timing & Tuning" as Category,
+  },
+  {
+    href: "/random-metric-modulation",
+    label: "Polyrhythm Metric Modulation Metronome",
+    description:
+      "A metronome that jumps to a new, mathematically related tempo every few bars.",
+    icon: MetricModulationIcon,
+    category: "Timing & Tuning" as Category,
+  },
+  {
+    href: "/tuner",
+    label: "Tuner",
+    description:
+      "Tune by ear or by mic with a tone generator, for strings, brass and reeds.",
+    icon: TunerIcon,
+    category: "Timing & Tuning" as Category,
+  },
+  {
+    href: "/slow-downer",
+    label: "Slow Downer",
+    description:
+      "Load a song, slow it down without changing pitch and loop the tricky parts.",
+    icon: WaveIcon,
+    category: "Audio" as Category,
+  },
+  {
+    href: "/recorder",
+    label: "Recorder",
+    description:
+      "Record yourself, play it back with loops and markers, and export the audio.",
+    icon: RecordIcon,
+    category: "Audio" as Category,
+    /** Needs a desktop-sized screen; it's greyed out in the mobile menu. */
+    desktopOnly: true,
   },
 ];
 
-/** Every tool, i.e. the nav minus the home page. */
-export const TOOLS = NAV_LINKS.filter((link) => link.href !== "/");
-
 export function filterLinks(query: string) {
   const q = query.trim().toLowerCase();
-  return q ? NAV_LINKS.filter((link) => link.label.toLowerCase().includes(q)) : NAV_LINKS;
+  return q
+    ? NAV_LINKS.filter((link) => link.label.toLowerCase().includes(q))
+    : NAV_LINKS;
+}
+
+/** Buckets a (possibly filtered) list of links by category, in `CATEGORIES` order. */
+export function groupByCategory<T extends { category: Category }>(
+  links: T[],
+): { category: Category; items: T[] }[] {
+  return CATEGORIES.map((category) => ({
+    category,
+    items: links.filter((link) => link.category === category),
+  })).filter((group) => group.items.length > 0);
 }

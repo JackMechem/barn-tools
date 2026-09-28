@@ -1,14 +1,40 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import { EyeIcon, NAV_LINKS } from "@/components/tools";
-import { useOptionsHidden } from "@/lib/panels";
+import { EyeIcon, EyeOffIcon, NAV_LINKS } from "@/components/tools";
+import { useOptionsHidden, useSidePanelHidden } from "@/lib/panels";
 
 const LayoutContext = createContext<"split" | "stacked">("split");
 
 /** Which layout the surrounding tool page uses, so controls can pick matching icons. */
 export function useToolLayout() {
   return useContext(LayoutContext);
+}
+
+/** The eye button that brings back a hidden column, labeled so it's clear which one it is. */
+function ShowPanelButton({
+  label,
+  align,
+  onClick,
+}: {
+  label: string;
+  align: "left" | "right";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Show ${label.toLowerCase()}`}
+      title={`Show ${label.toLowerCase()}`}
+      className={`flex items-center gap-1.5 self-start rounded-full bg-surface px-3 py-1.5 text-xs font-medium text-muted outline-none transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent xl:absolute xl:-top-10 xl:self-auto ${
+        align === "left" ? "xl:left-0" : "xl:right-0"
+      }`}
+    >
+      <EyeIcon className="h-4 w-4" />
+      {label}
+    </button>
+  );
 }
 
 /**
@@ -24,6 +50,8 @@ export default function ToolLayout({
   topAligned = false,
   titleExtra,
   help,
+  sidePanel,
+  sidePanelLabel,
   children,
 }: {
   title: string;
@@ -34,10 +62,15 @@ export default function ToolLayout({
   titleExtra?: React.ReactNode;
   /** A help button shown right after the title. */
   help?: React.ReactNode;
+  /** An extra panel on the right (split layout only), styled like the options column. */
+  sidePanel?: React.ReactNode;
+  /** What to call the side panel on its show/hide buttons (e.g. "History"). */
+  sidePanelLabel?: string;
   options: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [hidden, setHidden] = useOptionsHidden();
+  const [sidePanelHidden, setSidePanelHidden] = useSidePanelHidden();
   const stacked = layout === "stacked";
   const TitleIcon = NAV_LINKS.find((link) => link.label === title)?.icon;
 
@@ -65,19 +98,26 @@ export default function ToolLayout({
             <aside className="w-full">{options}</aside>
           </main>
         ) : (
-          <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-8 px-4 pb-16 pt-[calc(env(safe-area-inset-top)+4.5rem)] sm:px-6 lg:pt-16 xl:max-w-5xl xl:flex-row xl:gap-14">
+          <main
+            className={`mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-8 px-4 pb-16 pt-[calc(env(safe-area-inset-top)+4.5rem)] sm:px-6 lg:pt-16 xl:flex-row xl:gap-10 ${
+              sidePanel ? "xl:max-w-6xl" : "xl:max-w-5xl"
+            }`}
+          >
             <section className="flex w-full min-w-0 flex-col items-center gap-7 text-center xl:flex-1 xl:items-center xl:justify-center">
               <div className="relative flex w-full flex-col items-center gap-7 xl:max-w-[24rem]">
                 {hidden && (
-                  <button
-                    type="button"
+                  <ShowPanelButton
+                    label="Options"
+                    align="left"
                     onClick={() => setHidden(false)}
-                    aria-label="Show options"
-                    title="Show options"
-                    className="flex h-8 w-8 items-center justify-center self-start rounded-lg bg-surface text-muted outline-none transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent xl:absolute xl:-left-11 xl:-top-9 xl:self-auto"
-                  >
-                    <EyeIcon className="h-4 w-4" />
-                  </button>
+                  />
+                )}
+                {sidePanel && sidePanelHidden && (
+                  <ShowPanelButton
+                    label={sidePanelLabel ?? "Panel"}
+                    align="right"
+                    onClick={() => setSidePanelHidden(false)}
+                  />
                 )}
                 {children}
               </div>
@@ -85,6 +125,20 @@ export default function ToolLayout({
             {!hidden && (
               <aside className="flex w-full flex-col gap-3 xl:order-first xl:w-[24rem] xl:shrink-0">
                 {options}
+              </aside>
+            )}
+            {sidePanel && !sidePanelHidden && (
+              <aside className="flex w-full flex-col gap-2 xl:w-72 xl:shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSidePanelHidden(true)}
+                  aria-label={`Hide ${(sidePanelLabel ?? "panel").toLowerCase()}`}
+                  title={`Hide ${(sidePanelLabel ?? "panel").toLowerCase()}`}
+                  className="flex h-8 w-8 items-center justify-center self-end rounded-lg text-muted outline-none transition-colors hover:bg-surface hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  <EyeOffIcon className="h-4 w-4" />
+                </button>
+                {sidePanel}
               </aside>
             )}
           </main>

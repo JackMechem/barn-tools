@@ -106,56 +106,91 @@ export function scheduleClick(
   return osc;
 }
 
+export type ClickTrack = {
+  /**
+   * Also given the beat/subdivision counters it's about to schedule, so a caller that needs a
+   * tempo change to land exactly on a bar line (e.g. a metric-modulation trainer) can apply it
+   * right when `beat === 0 && sub === 0` — before this tick computes the gap to the next beat,
+   * rather than reacting to `onBeat` afterward, which is too late for that gap to reflect it.
+   */
+  getSettings: (beat: number, sub: number) => ClickSettings;
+  /** Fires (roughly) when each main beat of this track is heard. */
+  onBeat: (beat: number) => void;
+};
+
 /**
- * Starts a drift-free metronome. Settings are read on every scheduled tick, so
- * tempo, accents and subdivisions can change while it is running.
- * `onTick` fires (roughly) when each main beat is heard.
+ * Starts one or more drift-free, simultaneous clicks (e.g. a main click and a reference click at
+ * a different tempo) off a single shared scheduler tick. Running them off one `setInterval`
+ * rather than one each means they can only ever drift apart from their own intentional tempo
+ * difference — never from browser timer jitter nudging one track's schedule but not the other's.
  */
-export function startClickEngine(
-  getSettings: () => ClickSettings,
-  onBeat: (beat: number) => void,
-): ClickEngine {
+export function startClickEngine(tracks: ClickTrack[]): ClickEngine {
   const ctx = getAudioContext();
   if (ctx.state === "suspended") void ctx.resume();
 
-  let nextTime = ctx.currentTime + 0.06;
-  let beat = 0;
-  let sub = 0;
+  const startAt = ctx.currentTime + 0.06;
+  const state = tracks.map(() => ({ nextTime: startAt, beat: 0, sub: 0 }));
   const timeouts = new Set<ReturnType<typeof setTimeout>>();
 
   const id = setInterval(() => {
-    while (nextTime < ctx.currentTime + LOOKAHEAD_SEC) {
-      const s = getSettings();
-      if (beat >= s.beatsPerBar) beat = 0;
-      if (sub >= s.subdivision) sub = 0;
+    for (let i = 0; i < tracks.length; i++) {
+      const { getSettings, onBeat } = tracks[i];
+      const st = state[i];
+      while (st.nextTime < ctx.currentTime + LOOKAHEAD_SEC) {
+        const s = getSettings(st.beat, st.sub);
+        if (st.beat >= s.beatsPerBar) st.beat = 0;
+        if (st.sub >= s.subdivision) st.sub = 0;
 
-      const sound = CLICK_SOUNDS.find((c) => c.id === s.soundId) ?? CLICK_SOUNDS[0];
-      const vol = s.volume * sound.gain;
+        const sound =
+          CLICK_SOUNDS.find((c) => c.id === s.soundId) ?? CLICK_SOUNDS[0];
+        const vol = s.volume * sound.gain;
 
-      if (sub === 0) {
-        const level = s.accents[beat] ?? 1;
-        if (level === 2) {
-          scheduleClick(ctx, nextTime, sound.wave, sound.accentFreq, 0.9 * vol, sound.length);
-        } else if (level === 1) {
-          scheduleClick(ctx, nextTime, sound.wave, sound.normalFreq, 0.55 * vol, sound.length);
+        if (st.sub === 0) {
+          const level = s.accents[st.beat] ?? 1;
+          if (level === 2) {
+            scheduleClick(
+              ctx,
+              st.nextTime,
+              sound.wave,
+              sound.accentFreq,
+              0.9 * vol,
+              sound.length,
+            );
+          } else if (level === 1) {
+            scheduleClick(
+              ctx,
+              st.nextTime,
+              sound.wave,
+              sound.normalFreq,
+              0.55 * vol,
+              sound.length,
+            );
+          }
+          const shownBeat = st.beat;
+          const delayMs = Math.max(0, (st.nextTime - ctx.currentTime) * 1000);
+          const t = setTimeout(() => {
+            timeouts.delete(t);
+            onBeat(shownBeat);
+          }, delayMs);
+          timeouts.add(t);
+        } else {
+          scheduleClick(
+            ctx,
+            st.nextTime,
+            sound.wave,
+            sound.subFreq,
+            0.25 * vol,
+            sound.length * 0.6,
+          );
         }
-        const shownBeat = beat;
-        const delayMs = Math.max(0, (nextTime - ctx.currentTime) * 1000);
-        const t = setTimeout(() => {
-          timeouts.delete(t);
-          onBeat(shownBeat);
-        }, delayMs);
-        timeouts.add(t);
-      } else {
-        scheduleClick(ctx, nextTime, sound.wave, sound.subFreq, 0.25 * vol, sound.length * 0.6);
-      }
 
-      nextTime += 60 / s.bpm / s.subdivision;
-      sub++;
-      if (sub >= s.subdivision) {
-        sub = 0;
-        beat++;
-        if (beat >= s.beatsPerBar) beat = 0;
+        st.nextTime += 60 / s.bpm / s.subdivision;
+        st.sub++;
+        if (st.sub >= s.subdivision) {
+          st.sub = 0;
+          st.beat++;
+          if (st.beat >= s.beatsPerBar) st.beat = 0;
+        }
       }
     }
   }, SCHEDULER_INTERVAL_MS);

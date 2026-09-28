@@ -5,7 +5,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { OPEN_PALETTE_EVENT } from "@/components/CommandPalette";
 import ThemeModal from "@/components/ThemeModal";
-import { BarnLogo, SearchIcon, filterLinks, svgProps } from "@/components/tools";
+import {
+  BarnLogo,
+  NAV_LINKS,
+  SearchIcon,
+  filterLinks,
+  groupByCategory,
+  svgProps,
+} from "@/components/tools";
 
 const STORAGE_KEY = "jam-practice-sidebar";
 const DEFAULT_WIDTH = 220;
@@ -154,6 +161,8 @@ function SearchBox({
   );
 }
 
+type NavLink = (typeof NAV_LINKS)[number];
+
 function NavItems({
   collapsed,
   large,
@@ -166,48 +175,64 @@ function NavItems({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const links = filterLinks(query);
+  const groups = groupByCategory(filterLinks(query));
+
+  function renderLink({ href, label, icon: Icon, desktopOnly }: NavLink) {
+    const active = pathname === href;
+    // On phones, tools that need a bigger screen are shown greyed out and can't be opened.
+    if (large && desktopOnly) {
+      return (
+        <div
+          key={href}
+          aria-disabled="true"
+          title="Needs a larger screen"
+          className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-3 text-base font-medium text-muted opacity-40"
+        >
+          <Icon className="h-5 w-5 shrink-0" />
+          <span className="truncate">{label}</span>
+          <span className="ml-auto text-xs font-normal">Desktop only</span>
+        </div>
+      );
+    }
+    return (
+      <Link
+        key={href}
+        href={href}
+        onClick={onNavigate}
+        title={collapsed ? label : undefined}
+        className={`flex items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} border px-3 font-medium transition-colors ${
+          large ? "py-3 text-base" : "py-2 text-sm"
+        } ${collapsed ? "justify-center" : ""} ${
+          active
+            ? "border-accent/30 bg-accent/10 text-accent"
+            : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground"
+        }`}
+      >
+        <Icon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
+        {!collapsed && <span className="truncate">{label}</span>}
+      </Link>
+    );
+  }
+
   return (
-    <nav className="flex flex-col gap-1">
-      {links.length === 0 && (
+    <nav className="flex flex-col gap-3">
+      {groups.length === 0 && (
         <p className={`px-3 text-muted ${large ? "text-base" : "text-sm"}`}>No tools found</p>
       )}
-      {links.map(({ href, label, icon: Icon, desktopOnly }) => {
-        const active = pathname === href;
-        // On phones, tools that need a bigger screen are shown greyed out and can't be opened.
-        if (large && desktopOnly) {
-          return (
-            <div
-              key={href}
-              aria-disabled="true"
-              title="Needs a larger screen"
-              className="flex cursor-not-allowed items-center gap-3 rounded-xl px-3 py-3 text-base font-medium text-muted opacity-40"
+      {groups.map(({ category, items }) => (
+        <div key={category} className="flex flex-col gap-1">
+          {!collapsed && (
+            <p
+              className={`px-3 pb-0.5 font-semibold text-muted/70 ${
+                large ? "text-xs" : "text-[0.65rem]"
+              }`}
             >
-              <Icon className="h-5 w-5 shrink-0" />
-              <span className="truncate">{label}</span>
-              <span className="ml-auto text-xs font-normal">Desktop only</span>
-            </div>
-          );
-        }
-        return (
-          <Link
-            key={href}
-            href={href}
-            onClick={onNavigate}
-            title={collapsed ? label : undefined}
-            className={`flex items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} border px-3 font-medium transition-colors ${
-              large ? "py-3 text-base" : "py-2 text-sm"
-            } ${collapsed ? "justify-center" : ""} ${
-              active
-                ? "border-accent/30 bg-accent/10 text-accent"
-                : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground"
-            }`}
-          >
-            <Icon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
-            {!collapsed && <span className="truncate">{label}</span>}
-          </Link>
-        );
-      })}
+              {category}
+            </p>
+          )}
+          {items.map(renderLink)}
+        </div>
+      ))}
     </nav>
   );
 }
@@ -360,7 +385,9 @@ export default function Sidebar() {
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-accent ring-1 ring-foreground/10">
                 <BarnLogo className="h-5 w-5" />
               </span>
-              <span className="truncate text-lg font-bold tracking-tight text-accent">jackshed</span>
+              <span className="truncate text-lg font-bold tracking-tight text-accent">
+                jackshed
+              </span>
             </Link>
           )}
         </div>

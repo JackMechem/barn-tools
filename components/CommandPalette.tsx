@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { SearchIcon, filterLinks, svgProps } from "@/components/tools";
+import { SearchIcon, filterLinks, groupByCategory, svgProps } from "@/components/tools";
 
 export const OPEN_PALETTE_EVENT = "open-command-palette";
 
@@ -21,6 +21,7 @@ function Palette({ onClose }: { onClose: () => void }) {
   const listRef = useRef<HTMLUListElement>(null);
 
   const results = filterLinks(query);
+  const groups = groupByCategory(results);
   const activeIndex = Math.min(active, Math.max(0, results.length - 1));
 
   useEffect(() => {
@@ -82,30 +83,46 @@ function Palette({ onClose }: { onClose: () => void }) {
 
         <ul ref={listRef} role="listbox" className="max-h-80 overflow-y-auto p-2">
           {results.length === 0 && <li className="px-4 py-3 text-muted">No tools found</li>}
-          {results.map(({ href, label, icon: Icon }, i) => (
-            <li
-              key={href}
-              role="option"
-              aria-selected={i === activeIndex}
-              data-index={i}
-              onPointerMove={() => setActive(i)}
-              onClick={() => go(i)}
-              className={`flex cursor-pointer items-center gap-4 rounded-xl px-4 py-3 ${
-                i === activeIndex ? "bg-surface-hover" : ""
-              }`}
-            >
-              <Icon className="h-5 w-5 shrink-0 text-muted" />
-              <span className="flex-1 truncate">{label}</span>
-              {i === activeIndex && (
-                <span className="flex items-center gap-2 text-sm text-muted">
-                  Open
-                  <span className="flex h-6 w-6 items-center justify-center rounded bg-foreground/20 text-foreground">
-                    <EnterIcon className="h-4 w-4" />
-                  </span>
-                </span>
-              )}
-            </li>
-          ))}
+          {(() => {
+            let index = -1;
+            return groups.map(({ category, items }) => (
+              <li key={category} role="presentation">
+                <p className="px-4 pb-1 pt-3 text-xs font-semibold text-muted first:pt-1">
+                  {category}
+                </p>
+                <ul role="presentation">
+                  {items.map(({ href, label, icon: Icon }) => {
+                    index++;
+                    const i = index;
+                    return (
+                      <li
+                        key={href}
+                        role="option"
+                        aria-selected={i === activeIndex}
+                        data-index={i}
+                        onPointerMove={() => setActive(i)}
+                        onClick={() => go(i)}
+                        className={`flex cursor-pointer items-center gap-4 rounded-xl px-4 py-3 ${
+                          i === activeIndex ? "bg-surface-hover" : ""
+                        }`}
+                      >
+                        <Icon className="h-5 w-5 shrink-0 text-muted" />
+                        <span className="flex-1 truncate">{label}</span>
+                        {i === activeIndex && (
+                          <span className="flex items-center gap-2 text-sm text-muted">
+                            Open
+                            <span className="flex h-6 w-6 items-center justify-center rounded bg-foreground/20 text-foreground">
+                              <EnterIcon className="h-4 w-4" />
+                            </span>
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
+            ));
+          })()}
         </ul>
       </div>
     </div>
