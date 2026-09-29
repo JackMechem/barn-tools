@@ -157,6 +157,30 @@ export function IntervalIcon({ className }: { className?: string }) {
   );
 }
 
+export function UserIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 20a8 8 0 0116 0" />
+    </svg>
+  );
+}
+
+/** A simplified, single-color "G" mark for the Google sign-in button — not Google's official
+    multi-color logomark, kept monochrome to match every other icon on this site (all plain
+    `currentColor` strokes/fills), since the button's own "Continue with Google" label already
+    carries the actual identification. */
+export function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" className={className ?? "h-4 w-4"}>
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+      <text x="12" y="16.5" textAnchor="middle" fontSize="11" fontWeight="700" fill="currentColor">
+        G
+      </text>
+    </svg>
+  );
+}
+
 export function EarIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>

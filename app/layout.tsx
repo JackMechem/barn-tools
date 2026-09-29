@@ -1,8 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import { FONT_VARIABLE_CLASSES } from "@/app/fonts";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import CommandPalette from "@/components/CommandPalette";
+import ConvexClientProvider from "@/components/ConvexClientProvider";
 import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 
@@ -31,11 +33,28 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
         />
-        <Sidebar />
-        <CommandPalette />
-        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-xl lg:border lg:border-surface-hover">
-          {children}
-        </div>
+        {/* Server (reads the auth cookie during SSR) wraps client (holds the live Convex
+            connection) — the app's first-ever context providers. Purely additive: no visual/DOM
+            change, everything below is unchanged.
+
+            Tried dropping ConvexAuthNextjsServerProvider to keep every route statically
+            prerendered (it forces dynamic rendering app-wide by reading cookies() in the root
+            layout — confirmed via `pnpm build`'s route summary going from every route ○ Static to
+            every route ƒ Dynamic). That's not just a missed optimization: without it, `pnpm build`
+            fails outright — "Cannot destructure property 'isLoading' of 'c(...)' as it is
+            undefined" while prerendering /chord-charts — Convex Auth's client-side context isn't
+            safely renderable during Next's build-time static pass on its own. So this is the
+            required setup, not a preference; every route being server-rendered-on-demand is the
+            real, unavoidable cost of adding Convex Auth here. */}
+        <ConvexAuthNextjsServerProvider>
+          <ConvexClientProvider>
+            <Sidebar />
+            <CommandPalette />
+            <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-xl lg:border lg:border-surface-hover">
+              {children}
+            </div>
+          </ConvexClientProvider>
+        </ConvexAuthNextjsServerProvider>
       </body>
     </html>
   );

@@ -7,9 +7,12 @@ in `AGENTS.md`.
 ## What this is
 
 A personal collection of browser-based music practice tools, built for Jack (a musician/dev) as a
-Next.js (App Router) + Tailwind app, all client components (`"use client"`). Everything runs
-client-side — no backend, no accounts. Per-tool settings and data (tunes, projects, recordings)
-persist in the browser via localStorage / IndexedDB, not on a server.
+Next.js (App Router) + Tailwind app, all client components (`"use client"`). Almost everything
+still runs client-side — per-tool settings and data (tunes, projects, recordings) persist in the
+browser via localStorage / IndexedDB, not on a server, and every tool works fully with no account.
+As of this session there's a real backend (Convex) for one thing only: accounts (email+password
+and "Sign in with Google"), so far with **nothing synced yet** — see "Backend (Convex)" below for
+what exists, what's next, and the honest state of what's been verified.
 
 - **Displayed name:** "jackshed" (all lowercase, shown as the sidebar logo text and page title).
   It's been renamed several times in development (Barn Tools → Woodshed → The Barn → Barn Tools →
@@ -261,6 +264,198 @@ persist in the browser via localStorage / IndexedDB, not on a server.
   `components/tools.tsx`'s `NAV_LINKS`.
 - **Home** (`app/page.tsx` / `components/Home.tsx`) — just the logo/name and a "press / to
   search" hint; not itself in the nav list (the logo links to it instead).
+
+## Backend (Convex)
+
+Phase 1 of a planned multi-phase addition (accounts, then syncing data across devices) — **so
+far, accounts only, nothing syncs yet.** Every tool's actual data (tunes, chord charts, trainer
+stats/history, recordings, ...) is still pure localStorage/IndexedDB, completely unaffected; every
+tool still works fully with no account. This section will grow as later phases land.
+
+- `convex/schema.ts` — currently just `{...authTables}` (Convex Auth's own tables: `users`,
+  `authAccounts`, `authSessions`, etc.). No app data tables yet — those get added one at a time,
+  each alongside the phase that actually uses it.
+- `convex/auth.ts` — `convexAuth({ providers: [Password({ verify: ResendOTP }), Google] })`.
+  Google is listed in code already but **won't actually work** until `AUTH_GOOGLE_ID`/
+  `AUTH_GOOGLE_SECRET` are set on the deployment (`npx convex env set ...`) and a matching OAuth
+  Client ID exists in Google Cloud Console with redirect URI
+  `https://<deployment-name>.convex.site/api/auth/callback/google` — a one-time manual step only
+  Jack can do (his own Google account). Same story for `verify: ResendOTP` — it needs
+  `AUTH_RESEND_KEY` set (a Resend account, its own one-time signup) before it can actually send
+  anything; see the email-confirmation bullet below. Until both exist, "Continue with Google"
+  fails and password sign-up gets stuck waiting on a code that was never sent — the account page's
+  password flows have the exact same dependency.
+- **Email** (`convex/lib/resend.ts`, `convex/ResendOTP.ts`) — one shared `sendEmail` helper, a
+  thin `fetch()` wrapper around Resend's plain HTTP API (`https://api.resend.com/emails`) rather
+  than their Node SDK, since Convex actions can already call external APIs directly — no reason to
+  add a dependency just to POST one JSON body with a bearer token. Reads `AUTH_RESEND_KEY` (throws
+  a clear "you haven't set this yet" error if it's missing, rather than a confusing failure deeper
+  in) and an optional `AUTH_EMAIL_FROM` (defaults to `onboarding@resend.dev`, Resend's own
+  no-setup-required sending address — a verified custom domain is a nicer `from` address but isn't
+  required to get this working). Two things live here rather than in `convex/account.ts`, since
+  both are used by more than one caller: `generateOtp` (a 6-digit numeric code — short enough to
+  type by hand, unlike Convex Auth's own 32-character default verification token) and `hashCode`
+  (SHA-256 via the Web Crypto API already available in Convex's action runtime — confirmation
+  codes are stored hashed, not in plaintext, in `pendingConfirmations` below). `ResendOTP.ts` wraps
+  `sendEmail`/`generateOtp` as an `Email`-type provider (`@convex-dev/auth/providers/Email`) for
+  Convex Auth's own sign-up verification — see the `auth.ts` bullet above. It only supplies *how*
+  to send the code; Convex Auth's `Password` provider already owns *when* to trigger it (a fresh
+  sign-up, or any account whose `emailVerified` isn't set yet — traced through the installed
+  package's actual source, `Password.ts`'s `authorize` function, to confirm this rather than
+  guessing) and the code storage/expiry/one-time-use machinery (`authVerificationCodes`, already
+  part of the schema via `authTables`, previously unused since verification was never turned on
+  before now).
+- `convex/users.ts` — one `current` query (the signed-in user's own doc, or `null`) for the
+  account button to show who's signed in. Not a synced-data domain, just identity.
+- `components/AccountMenu.tsx` — the sign-in/account UI, **built from scratch, no premade auth
+  widget** (Jack asked for this explicitly): signed out, a small custom modal with email+password
+  (sign-in/sign-up toggle) and "Continue with Google", styled to match this app's own
+  `ConfirmDialog`/`PromptDialog` conventions (same backdrop/panel/Escape-to-close shape). A
+  password sign-up (or any pre-existing account that's never verified its email) doesn't complete
+  right away — `signIn("password", {...})` resolves with `{signingIn: false}` and no error, which
+  the form reads as "a code was emailed" and swaps to a "check your email" step;
+  `signIn("password", {email, code, flow: "email-verification"})` completes it. That
+  `signingIn`/thrown-error distinction is the only signal the client gets — confirmed by reading
+  the actual client `signIn` implementation (`@convex-dev/auth`'s `client.tsx`) rather than
+  assuming a shape. Signed in, it's a plain link to the `/account` page instead (below) — mounted
+  in `components/Sidebar.tsx` as a sibling of `ThemeButton` in both footers (desktop `<aside>` and
+  the mobile overlay), same `collapsed`/`large` prop shape, plus an `onNavigate` so the mobile
+  overlay closes itself on tap, same as every other nav link there.
+- **`/account`** (`app/account/page.tsx` / `components/AccountPage.tsx`) — password (change or set
+  one for the first time), sign-in methods (connect/disconnect Google), and delete account.
+  Creating an account, changing/setting a password, and deleting an account (except a Google-only
+  account — see below) all now require confirming a code emailed first, per an explicit follow-up
+  request; a "forgot password" *reset* flow (recovering access when you don't know your *current*
+  password at all) is still deliberately not implemented — a different thing from the email
+  confirmations this section describes, and still out of scope. No route protection, consistent
+  with the rest of the app — visiting it signed out just shows a plain "you're not signed in"
+  message instead of redirecting. `convex/account.ts`'s `linkedProviders` query (which providers —
+  `"password"`, `"google"` — are on the signed-in user's `authAccounts` rows) drives which of
+  these sections show what.
+  - **Password** (`PasswordSection`) is one section that's either "Change password" (has one
+    already) or "Set a password" (Google-only so far) — same `linkedProviders` check throughout
+    this feature — and now a two-step flow either way: step 1 (`requestPasswordConfirmation`)
+    verifies the *current* password if there is one (`retrieveAccount`, throws on a mismatch) and
+    emails a code; step 2 (`confirmPassword`) takes that code plus the new password and actually
+    applies it, re-checking `linkedProviders` *again* at that point (rather than trusting which
+    step-1 path was taken) to decide between `modifyAccountCredentials` (existing password — then
+    `invalidateSessions` on every *other* session, since a leaked old password shouldn't still
+    work elsewhere) and `createAccount` with `shouldLinkViaEmail: true` (first password — links to
+    the *already-signed-in* user by matching their already-verified email rather than accidentally
+    creating a second user; Convex Auth's account linking is fundamentally email-match-based, not
+    session-based — traced through the installed package's actual source,
+    `defaultCreateOrUpdateUser`, to confirm this rather than guessing — with the same defensive
+    `linkedUser._id === userId` check as before). The new password is deliberately never sent to
+    step 1 at all and never touches the database before step 2 succeeds — it just sits in
+    `PasswordSection`'s own React state between the two submits, so a password is never persisted
+    anywhere while a confirmation is still pending.
+  - **Sign-in methods** (`SignInMethodsSection`) — "Connect Google" is literally the same
+    `signIn("google")` OAuth flow as signing in, relying on that same email-matching linking
+    behavior; it only lands on *this* account if the Google account's email matches. Since that's a
+    real, somewhat confusing failure mode (a mismatched email silently signs into — or creates — a
+    *different* account instead, with no error), `useGoogleLinkWarning` records the current email
+    in `sessionStorage` right before redirecting to Google, then — on the fresh page load once
+    Google redirects back — compares it against whoever's actually signed in and shows a plain-
+    language warning if they don't match. Reads the marker once via a lazy `useState` initializer
+    (safe — it only runs at mount) and derives the warning as a plain value during render; the
+    accompanying `useEffect` only clears the marker (a real side effect against sessionStorage), it
+    never calls `setState` itself — hit `react-hooks/set-state-in-effect` on a first draft that did
+    call `setState` synchronously inside the effect body, restructured to avoid it. "Disconnect
+    Google" (`disconnectGoogle` action) is only enabled once a password exists — checked both
+    client-side (the button's `disabled`) and server-side (the action re-checks
+    `linkedProviders`, since the action is the real source of truth, not the UI) — so there's
+    always at least one way to sign back in. (Disconnecting doesn't need an emailed confirmation
+    itself — only creating/deleting/changing credentials does, per the request that added this
+    whole section — but it's already gated behind having a password, which is its own form of
+    "prove you can still get in another way.")
+  - **Delete account** is a confirm-first modal (`DeleteAccountModal`, following `ConfirmDialog`'s
+    own shape) with two different paths depending on `linkedProviders`, per an explicit exception
+    for accounts with only Google and no password: a password-holding account goes through the
+    *same* two-step emailed-confirmation shape as the password section — step 1
+    (`requestDeleteConfirmation`) verifies the password and emails a code, step 2 (`confirmDelete`)
+    takes the code and actually deletes; a Google-only account instead keeps the original
+    single-step "type `DELETE`" flow straight into `deleteAccount` — no password to gate an email
+    behind, and the typed confirmation is treated as enough friction on its own for that case.
+    `deleteAccount` itself now refuses outright if the account *does* have a password (so it can't
+    be used to route around the email confirmation those accounts require — the action is the
+    source of truth, not which UI path the client happened to take). Whichever path runs, the
+    actual deletion is the same `internalMutation` (`performDelete`) hand-cascading across Convex
+    Auth's own tables — there's no built-in "delete this user" helper, so this walks `authAccounts`
+    (by the `userIdAndProvider` index) deleting each one's `authVerificationCodes` (by `accountId`)
+    first, then `authSessions` (by `userId`) deleting each one's `authRefreshTokens` (by
+    `sessionId`) first, then the `users` row itself — the same per-account delete helper
+    (`deleteAuthAccountAndCodes`) is shared with "Disconnect Google" above, since it's the same
+    operation just scoped to one provider instead of all of them. Deliberately *doesn't* also sweep
+    `authVerifiers`/`authRateLimits` — neither has a `userId`-scoped index (short-lived PKCE/
+    rate-limit bookkeeping, not reachable without a full table scan), and once the account+session
+    rows are gone the user can't sign back in regardless. The client calls `signOut()` right after
+    either path succeeds, since the server-side rows being gone doesn't by itself clear this
+    device's cached token.
+  - **`pendingConfirmations`** (`convex/schema.ts`) is the one table behind both the password and
+    delete-account confirmation flows: one row per `(userId, kind)` (`"password"` or
+    `"deleteAccount"`), storing a SHA-256 hash of the code (not the code itself) plus an expiry
+    (15 minutes). A fresh request (`storeConfirmation`, `internalMutation`) deletes any existing
+    pending row for that same `(userId, kind)` before inserting — no stacking multiple live codes.
+    `consumeConfirmation` checks the submitted code's hash against the stored one and the expiry in
+    one step, deleting the row either way it's actually used (success) — a wrong or expired code
+    just leaves the pending row in place to actually expire on its own. This is deliberately
+    separate machinery from Convex Auth's own sign-up verification (`authVerificationCodes`, owned
+    entirely by the library) — these are app-specific confirmations for actions taken *after*
+    already being signed in, not part of authenticating in the first place.
+- `components/ConvexClientProvider.tsx` + `app/layout.tsx` — the app's first-ever React context
+  providers. **`ConvexAuthNextjsServerProvider` is required, not optional** — confirmed by trying
+  to remove it: `pnpm build` then fails outright while prerendering (`Cannot destructure property
+  'isLoading' of 'c(...)' as it is undefined`), because Convex Auth's client-side auth context
+  isn't safely renderable during Next's static-generation pass on its own. Keeping it means every
+  route builds as `ƒ Dynamic` (server-rendered on demand) instead of the `○ Static` every route
+  was before this session — a real, unavoidable cost of adding Convex Auth to the root layout, not
+  a missed optimization. Worth knowing if page-load performance or hosting cost ever seems off
+  after this.
+- `proxy.ts` (repo root) — `convexAuthNextjsMiddleware()`, no route-gating (every tool stays fully
+  usable signed out, by design). Named `proxy.ts`, **not** `middleware.ts` — Next.js 16 (this repo
+  is on 16.3.4) renamed the convention; the API is unchanged, just the filename.
+- `convex/_generated/` is **committed** to the repo (there's no CI here that runs `convex dev`
+  first, so committing keeps `tsc`/`pnpm build` runnable standalone). Regenerate it with
+  `npx convex dev --once` after any change to a `convex/*.ts` file — `tsc` will fail against a
+  stale `api.d.ts` otherwise (hit this directly while building this phase: adding `convex/users.ts`
+  didn't show up in `api.*` until re-running).
+- Package manager is **pnpm only** now — the stray `package-lock.json` (this repo briefly had
+  both) has been deleted; `pnpm-lock.yaml` + `pnpm-workspace.yaml` are the real ones.
+- No password reset / email verification (deliberately deferred — needs a transactional email
+  provider like Resend, which is out of scope for this phase). If email+password sign-up
+  succeeds but someone forgets their password, there's currently no recovery path.
+- **What's genuinely untested here**: none of the actual sign-up/sign-in/sign-out flow, or the
+  Google OAuth round-trip, has ever been clicked through in a real browser — this sandbox has no
+  working browser (same limitation noted elsewhere in this file for Chord Charts'
+  `FitChordRow`/Playwright). `tsc`/`pnpm lint`/`pnpm build` all pass and `npx convex dev --once`
+  successfully pushes the schema/functions to a real dev deployment, but none of that proves the
+  UI actually works end to end for a person clicking through it. Needs a real pass by Jack: sign
+  up, sign in, sign out, refresh persistence, both sidebar chrome states (desktop
+  expanded/collapsed, mobile), and — once the Google Cloud OAuth app exists — "Continue with
+  Google" specifically. Same goes for `/account`'s change-password (including that
+  `invalidateSessions` actually signs out other devices/tabs and not the current one) and
+  delete-account flows (including the cascade delete genuinely leaving no way to sign back in, and
+  that a Google-only account's `DELETE`-to-confirm path works with no password field shown). And
+  now, the account-linking additions specifically: whether "Set a password" on a Google-only
+  account really attaches to the same user (the `linkedUser._id !== userId` check is only a
+  same-session sanity check — it can't prove `shouldLinkViaEmail`'s underlying matching behaved as
+  read from the library's source, only that this action didn't return an obviously-wrong user id);
+  whether "Connect Google" with a *matching*-email Google account actually links instead of
+  erroring; and whether the mismatched-email warning (`useGoogleLinkWarning`) actually fires
+  correctly across a real Google OAuth redirect round-trip, versus just working in theory against
+  the sessionStorage read/write logic in isolation. And now the whole email-confirmation layer:
+  whether Resend actually delivers (needs `AUTH_RESEND_KEY` set — a Resend account, its own
+  one-time signup, same category of prerequisite as Google's OAuth app; not done as of this
+  writing), whether the default `onboarding@resend.dev` sender lands in an inbox instead of spam
+  without a verified custom domain, the full sign-up "enter code, get signed in" round-trip
+  (`ResendOTP`/Convex Auth's own `email-verification` flow), and both of `convex/account.ts`'s
+  request/confirm pairs end to end (`requestPasswordConfirmation`/`confirmPassword`,
+  `requestDeleteConfirmation`/`confirmDelete`) — including that a wrong or expired code is
+  actually rejected by `consumeConfirmation`, and that a fresh request really does replace (not
+  stack alongside) an earlier unconfirmed one. Only verified so far: `generateOtp`/`hashCode`
+  (`convex/lib/resend.ts`) against a synthetic Node script (6-digit codes, deterministic/collision-
+  free SHA-256 hashing) and that every new Convex function type-checks and deploys — nothing about
+  an actual email ever having been sent or received.
 
 ## Shared conventions — reuse these before writing something new
 

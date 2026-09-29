@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import AccountMenu from "@/components/AccountMenu";
 import { OPEN_PALETTE_EVENT } from "@/components/CommandPalette";
 import ThemeModal from "@/components/ThemeModal";
 import {
@@ -359,6 +360,7 @@ export default function Sidebar() {
             <NavItems large query={query} onNavigate={() => setMobileOpen(false)} />
           </div>
           <div className="mt-auto flex flex-col gap-1 border-t border-surface-hover pt-2">
+            <AccountMenu large onNavigate={() => setMobileOpen(false)} />
             <ThemeButton large onClick={() => setThemeOpen(true)} />
           </div>
         </div>
@@ -412,6 +414,7 @@ export default function Sidebar() {
         )}
         <NavItems collapsed={collapsed} query={query} />
         <div className="mt-auto flex flex-col gap-1 border-t border-surface-hover pt-2">
+          <AccountMenu collapsed={collapsed} />
           <ThemeButton collapsed={collapsed} onClick={() => setThemeOpen(true)} />
         </div>
 
