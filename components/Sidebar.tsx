@@ -351,8 +351,14 @@ export default function Sidebar() {
             onChange={setQuery}
             onNavigate={() => setMobileOpen(false)}
           />
-          <NavItems large query={query} onNavigate={() => setMobileOpen(false)} />
-          <div className="mt-auto">
+          {/* min-h-0 lets this shrink below its content's natural height (the flex-column
+              default is min-height: auto, which would otherwise just grow the whole menu past
+              the screen instead of scrolling) — needed now that the tool list is long enough to
+              overflow a phone screen on its own. */}
+          <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+            <NavItems large query={query} onNavigate={() => setMobileOpen(false)} />
+          </div>
+          <div className="mt-auto flex flex-col gap-1 border-t border-surface-hover pt-2">
             <ThemeButton large onClick={() => setThemeOpen(true)} />
           </div>
         </div>
