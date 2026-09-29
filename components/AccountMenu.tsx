@@ -176,6 +176,20 @@ function AuthForm({ onClose }: { onClose: () => void }) {
 
         {error && <p className="text-sm text-danger">{error}</p>}
 
+        {flow === "signUp" && (
+          <p className="text-xs text-muted">
+            By creating an account, you agree to jackshed&apos;s{" "}
+            <Link href="/terms" className="underline hover:text-foreground">
+              Terms
+            </Link>{" "}
+            and{" "}
+            <Link href="/privacy" className="underline hover:text-foreground">
+              Privacy Policy
+            </Link>
+            .
+          </p>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"

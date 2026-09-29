@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { BarnLogo } from "@/components/tools";
 
 export default function Home() {
@@ -57,6 +58,20 @@ export default function Home() {
           </svg>
           GitHub
         </a>
+        <span aria-hidden>·</span>
+        <Link
+          href="/privacy"
+          className="font-medium text-accent underline-offset-4 outline-none hover:underline focus-visible:underline"
+        >
+          Privacy
+        </Link>
+        <span aria-hidden>·</span>
+        <Link
+          href="/terms"
+          className="font-medium text-accent underline-offset-4 outline-none hover:underline focus-visible:underline"
+        >
+          Terms
+        </Link>
       </footer>
     </div>
   );

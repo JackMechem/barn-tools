@@ -264,6 +264,19 @@ what exists, what's next, and the honest state of what's been verified.
   `components/tools.tsx`'s `NAV_LINKS`.
 - **Home** (`app/page.tsx` / `components/Home.tsx`) — just the logo/name and a "press / to
   search" hint; not itself in the nav list (the logo links to it instead).
+- **Privacy Policy / Terms of Service** (`app/privacy/page.tsx`, `app/terms/page.tsx`,
+  `components/LegalPage.tsx`) — plain prose pages, not tools (no `ToolLayout`), and plain Server
+  Components (no `"use client"` anywhere in either — no interactivity needed). Linked from
+  `Home.tsx`'s footer and, only during the sign-up flow specifically, `AccountMenu.tsx`'s
+  `AuthForm`. Written to accurately describe what this app *actually* does (client-side-only
+  tool data, what an account collects, the Convex/Resend/Google/Vercel third parties involved,
+  no analytics/tracking anywhere in the codebase — confirmed by grepping for common trackers
+  before writing this), with jurisdiction (Los Angeles County, California) and the
+  privacy-request contact channel (GitHub issues, reusing what `README.md` already directs bug
+  reports to) both confirmed with Jack rather than assumed. **Not reviewed by an actual lawyer**
+  — a reasonable, honest starting point given this app's genuinely low-risk profile (no payments,
+  no ads, minimal data collection), not a substitute for real legal review if that ever matters
+  more (e.g. it picks up real users, or the planned data-sync phases land).
 
 ## Backend (Convex)
 
@@ -272,6 +285,23 @@ far, accounts only, nothing syncs yet.** Every tool's actual data (tunes, chord 
 stats/history, recordings, ...) is still pure localStorage/IndexedDB, completely unaffected; every
 tool still works fully with no account. This section will grow as later phases land.
 
+**Deploying it — two separate targets, not automatic together by default.** A `git push` alone
+only redeploys the frontend (Vercel); it does *not* push anything under `convex/` to the
+production Convex deployment (`grandiose-dolphin-564`) — that's a genuinely separate step
+(`npx convex deploy`) unless wired together, which `vercel.json`'s `buildCommand` now does:
+```
+npx convex deploy --cmd 'pnpm build'
+```
+This deploys Convex functions *before* building the frontend, on every Vercel build, so the two
+can't drift out of sync (a frontend build that depends on a Convex function that hasn't been
+deployed yet would otherwise just break in production). It authenticates via a `CONVEX_DEPLOY_KEY`
+environment variable in Vercel (a **Production**-scoped deploy key from the Convex dashboard's
+Deploy Keys page — deliberately not set for Preview/Development, so a future preview-branch build
+can't accidentally push to production Convex) rather than a personal login, which is what makes it
+safe to run inside an automated build at all — `npx convex deploy` refuses to run non-interactively
+under a personal login (confirmed directly: it prompts "Do you want to push your code to your prod
+deployment now?" and hard-refuses even with `CI=1` set or `y` piped into stdin — a deploy key is
+the only way around that prompt, not a flag).
 - `convex/schema.ts` — currently just `{...authTables}` (Convex Auth's own tables: `users`,
   `authAccounts`, `authSessions`, etc.). No app data tables yet — those get added one at a time,
   each alongside the phase that actually uses it.
