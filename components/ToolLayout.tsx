@@ -90,7 +90,7 @@ export default function ToolLayout({
         </div>
 
         {credit && (
-          <p className="pointer-events-none fixed bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] right-[calc(env(safe-area-inset-right)+0.75rem)] z-10 text-xs text-muted/70">
+          <p className="pointer-events-none fixed bottom-[calc(env(safe-area-inset-bottom)+1.25rem)] right-[calc(env(safe-area-inset-right)+1.5rem)] z-10 text-xs text-muted/70">
             {credit}
           </p>
         )}

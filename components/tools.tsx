@@ -146,6 +146,17 @@ export function ScaleIcon({ className }: { className?: string }) {
   );
 }
 
+export function IntervalIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <path d="M8 16L16 8" />
+      <path d="M16 8h-4.5M16 8v4.5" />
+    </svg>
+  );
+}
+
 export function TunerIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>
@@ -369,6 +380,14 @@ export const NAV_LINKS = [
     description:
       "Random scales in your instrument's range, with a listen mode that grades you note by note.",
     icon: ScaleIcon,
+    category: "Practice" as Category,
+  },
+  {
+    href: "/interval-trainer",
+    label: "Interval Trainer",
+    description:
+      "Random intervals in your instrument's range, with a listen mode that grades you.",
+    icon: IntervalIcon,
     category: "Practice" as Category,
   },
   {

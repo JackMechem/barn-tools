@@ -114,6 +114,35 @@ persist in the browser via localStorage / IndexedDB, not on a server.
   round per struggling key, built with `scaleRoundForPitchClass` for that exact key+mode rather
   than a random root of the mode — not the full `drillQueueForPool` 12-key-per-mode sweep "Drill
   every scale" does, so it stays quick and targeted on what's actually giving trouble.
+- **Interval Trainer** (`components/IntervalTrainer.tsx`, `lib/intervals.ts`) — same shape again
+  (same shared countdown ring/timer/note-spelling code), but drills the twelve intervals within an
+  octave (minor 2nd through an octave, `lib/intervals.ts`'s `INTERVALS`, all enabled by default —
+  a small enough set that a curated starter subset isn't worth the friction) instead of scales. A
+  round is `{interval, direction, startMidi, notes: [start, target]}` — always exactly two notes,
+  so `handleFrame`'s degree-by-degree grading loop is reused almost verbatim from Scale Trainer. An
+  "Include descending intervals" toggle (Intervals panel) controls whether a round can ask for the
+  interval *below* the starting note as well as above; off by default (ascending only). Listen mode
+  has two distinct styles, both built on the existing "precompute the next round for preview" ref
+  (`upcomingRef`) rather than any new state:
+  1. **Fresh root each round** (default) — `randomIntervalRound` picks a brand-new random starting
+     note every time, shown as e.g. "C4 ↑ Major 3rd".
+  2. **Continue from previous note** (the "Continue from previous note" toggle, mutually exclusive
+     with "Drill every interval") — `chainedIntervalRound` starts the next round exactly on the
+     *target* note the previous round just ended on, so the display drops the starting note and
+     shows just the interval with a direction arrow (e.g. "↑ Perfect 4th") since the player is
+     already sitting on the note — `IntervalRound.showRoot` is what the label logic keys off. Falls
+     back to a fresh root (with `showRoot: true`) if the chain runs out of range to continue in.
+  "Drill every interval" works like Scale Trainer's "Drill every scale": every selected interval, in
+  every selected direction, starting on all 12 keys, each its own random octave
+  (`drillQueueForPool`); a missed round is requeued with a freshly re-rolled octave
+  (`intervalRoundForPitchClass`) rather than the identical one. Shares the lifetime "Struggles"
+  panel and "Shed weak intervals" button (`lib/struggleStats.ts`), but keyed by interval *and*
+  direction together (`"M3:1"` = ascending Major 3rd, `"M3:-1"` = descending — `intervalStatKey`/
+  `parseIntervalStatKey`), not by starting note, since an interval is the same struggle wherever
+  it's started from. A weak session is one round per struggling interval+direction
+  (`randomIntervalRound` with that single interval/direction forced), not the full drill sweep.
+  An optional "Play interval out loud" toggle (quiz mode only, not listen mode) plays both notes in
+  order, spaced out, instead of a single note like the other two trainers.
 - **Chord Charts** (`components/ChordCharts.tsx`, `components/ChordChart.tsx`,
   `lib/iRealPro.ts`) — paste an iReal Pro playlist link (the `irealb://...` links shared on the
   iReal Pro forums) and read its charts, styled to match the site. The link's chord data is
@@ -230,6 +259,10 @@ from something that used to work:
   wrong note (immediately by default, or after a second miss on the same degree with "Partial
   credit" on), the drill queue's per-key/per-octave coverage, and the "Sound feedback" click
   scheduling (a `setTimeout` per countdown second, cleared and rescheduled on every round change).
+- Interval Trainer listen mode: same live-pitch-grading machinery again, plus its own untested
+  bits — "Continue from previous note" chaining actually starting each round on the prior round's
+  target note rather than drifting, and whether the "no starting note shown" display reads clearly
+  in practice for a chained round.
 - Tuner: the tone generator and the per-instrument string tunings.
 - Polyrhythm Metric Modulation Metronome: the bar-boundary detection driving each
   modulation (relies on the
