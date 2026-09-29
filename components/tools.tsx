@@ -157,6 +157,27 @@ export function IntervalIcon({ className }: { className?: string }) {
   );
 }
 
+export function EarIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M4 13a8 8 0 0116 0v4" />
+      <rect x="3" y="13" width="4" height="7" rx="2" />
+      <rect x="17" y="13" width="4" height="7" rx="2" />
+    </svg>
+  );
+}
+
+export function ChordIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <ellipse cx="7" cy="19" rx="3" ry="2.2" />
+      <ellipse cx="7" cy="13.5" rx="3" ry="2.2" />
+      <ellipse cx="7" cy="8" rx="3" ry="2.2" />
+      <path d="M10 19V4M10 4l6 1.5" />
+    </svg>
+  );
+}
+
 export function TunerIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>
@@ -354,7 +375,12 @@ export function HomeIcon({ className }: { className?: string }) {
 }
 
 /** Groups tools in the sidebar and search; also fixes their display order. */
-export const CATEGORIES = ["Practice", "Timing & Tuning", "Audio"] as const;
+export const CATEGORIES = [
+  "Practice",
+  "Ear Training",
+  "Timing & Tuning",
+  "Audio",
+] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 export const NAV_LINKS = [
@@ -389,6 +415,22 @@ export const NAV_LINKS = [
       "Random intervals in your instrument's range, with a listen mode that grades you.",
     icon: IntervalIcon,
     category: "Practice" as Category,
+  },
+  {
+    href: "/guess-the-interval",
+    label: "Guess the Interval",
+    description:
+      "Hear an interval and pick which one it is, against the same countdown-timed rounds as Interval Trainer.",
+    icon: EarIcon,
+    category: "Ear Training" as Category,
+  },
+  {
+    href: "/guess-the-chord",
+    label: "Guess the Chord",
+    description:
+      "Hear a chord — including weird slash chords — and type its symbol, iReal-Pro style (F#^7, Ab-7/D, ...).",
+    icon: ChordIcon,
+    category: "Ear Training" as Category,
   },
   {
     href: "/metronome",

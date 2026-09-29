@@ -36,17 +36,12 @@ export type IntervalRound = {
   startMidi: number;
   /** [start, target], the order they need to be played in. */
   notes: string[];
-  /** Whether the starting note should be shown/announced. True for a fresh starting note; false
-      for a "continue from the previous note" round in chained mode, where the player is already
-      sitting on it and only the interval (with a direction arrow) is shown. */
-  showRoot: boolean;
 };
 
 function buildRound(
   startMidi: number,
   interval: IntervalDef,
   direction: Direction,
-  showRoot: boolean,
 ): IntervalRound {
   const targetMidi = startMidi + interval.semitones * direction;
   return {
@@ -54,7 +49,6 @@ function buildRound(
     direction,
     startMidi,
     notes: [midiToNote(startMidi), midiToNote(targetMidi)],
-    showRoot,
   };
 }
 
@@ -90,26 +84,28 @@ export function randomIntervalRound(
   range: ParsedRange,
   pool: IntervalDef[],
   directions: Direction[],
-  showRoot = true,
 ): IntervalRound {
   for (let attempt = 0; attempt < 20; attempt++) {
     const start = randomStartMidi(range);
     const choices = validChoices(start, range, pool, directions);
     if (choices.length > 0) {
       const picked = choices[Math.floor(Math.random() * choices.length)];
-      return buildRound(start, picked.interval, picked.direction, showRoot);
+      return buildRound(start, picked.interval, picked.direction);
     }
   }
   const start = range.lowMidi;
   const choices = validChoices(start, range, pool, [1, -1]);
   const picked = choices[0] ?? { interval: pool[0], direction: 1 as Direction };
-  return buildRound(start, picked.interval, picked.direction, showRoot);
+  return buildRound(start, picked.interval, picked.direction);
 }
 
 /** The next round in a chain: starts exactly where `fromMidi` (the previous round's target) left
-    off, so the interval continues relative to the note just reached rather than a fresh root.
-    Falls back to a brand-new random round (a fresh root, `showRoot: true`) if the chain's run out
-    of room to go anywhere from here without leaving the range. */
+    off, so the interval continues relative to the note just reached rather than a fresh root. The
+    starting note is still always shown/announced (`roundLabel` in the component doesn't special-case
+    this) — a chain runs silently through several rounds, so losing track of where you are after one
+    wrong note would otherwise leave you stuck with no way to recover mid-session. Falls back to a
+    brand-new random round if the chain's run out of room to go anywhere from here without leaving
+    the range. */
 export function chainedIntervalRound(
   fromMidi: number,
   range: ParsedRange,
@@ -117,9 +113,9 @@ export function chainedIntervalRound(
   directions: Direction[],
 ): IntervalRound {
   const choices = validChoices(fromMidi, range, pool, directions);
-  if (choices.length === 0) return randomIntervalRound(range, pool, directions, true);
+  if (choices.length === 0) return randomIntervalRound(range, pool, directions);
   const picked = choices[Math.floor(Math.random() * choices.length)];
-  return buildRound(fromMidi, picked.interval, picked.direction, false);
+  return buildRound(fromMidi, picked.interval, picked.direction);
 }
 
 /** Every octave of `pitchClass` (0 = C, 1 = C#, …) whose start note *and* its target (this
@@ -150,7 +146,7 @@ export function intervalRoundForPitchClass(
   const candidates = rootCandidatesForPitchClass(range, pitchClass, interval, direction);
   if (candidates.length === 0) return null;
   const start = candidates[Math.floor(Math.random() * candidates.length)];
-  return buildRound(start, interval, direction, true);
+  return buildRound(start, interval, direction);
 }
 
 /** The full drill: every selected interval, in every selected direction, starting on all 12 keys

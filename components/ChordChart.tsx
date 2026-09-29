@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { Oswald } from "next/font/google";
 import {
   formatComposer,
+  prettyQuality,
   type Bar,
   type ChordSlot,
   type IRealSong,
@@ -316,15 +317,6 @@ function FitChordRow({ children }: { children: React.ReactNode }) {
 }
 
 const ACCIDENTAL_GLYPH: Record<"b" | "#", string> = { b: "♭", "#": "♯" };
-
-function prettyQuality(quality: string): string {
-  return quality
-    .replace(/\^/g, "Δ")
-    .replace(/h/g, "ø")
-    .replace(/o/g, "°")
-    .replace(/#/g, "♯")
-    .replace(/b/g, "♭");
-}
 
 // Every part of a chord symbol below (root, its accidental, the quality/extension, the slash
 // bass) is sized with an explicit font-size driven by the `--col`-based clamp()s above, not a

@@ -709,7 +709,7 @@ export default function IntervalTrainer() {
       const queue = weak
         ? shuffled(
             weakList.map((e) =>
-              randomIntervalRound(range, [e.interval], [e.direction], true),
+              randomIntervalRound(range, [e.interval], [e.direction]),
             ),
           )
         : drilling
@@ -859,7 +859,7 @@ export default function IntervalTrainer() {
         following = session.queue[0] ?? null;
         upcomingRef.current = null;
       } else {
-        next = upcomingRef.current ?? randomIntervalRound(range, pool, directions, true);
+        next = upcomingRef.current ?? randomIntervalRound(range, pool, directions);
         const isLast = session ? session.index >= session.total : false;
         if (isLast) {
           following = null;
@@ -868,9 +868,9 @@ export default function IntervalTrainer() {
           following =
             fromMidi !== null
               ? chainedIntervalRound(fromMidi, range, pool, directions)
-              : randomIntervalRound(range, pool, directions, true);
+              : randomIntervalRound(range, pool, directions);
         } else {
-          following = randomIntervalRound(range, pool, directions, true);
+          following = randomIntervalRound(range, pool, directions);
         }
         upcomingRef.current = following;
       }
@@ -912,10 +912,10 @@ export default function IntervalTrainer() {
   const arrow = (r: IntervalRound) => (r.direction === 1 ? "↑" : "↓");
   const rootLabel = (r: IntervalRound, seq = 0) =>
     spellNote(midiToNote(r.startMidi), accidentalStyle, seq, ignoreOctave);
+  // The starting note is always shown, even mid-chain — a chained round that hid it would leave
+  // no way to recover after a wrong note, since there'd be nothing on screen to re-orient from.
   const roundLabel = (r: IntervalRound, seq = 0) =>
-    r.showRoot
-      ? `${rootLabel(r, seq)} ${arrow(r)} ${r.interval.label}`
-      : `${arrow(r)} ${r.interval.label}`;
+    `${rootLabel(r, seq)} ${arrow(r)} ${r.interval.label}`;
   const mainLabel = round ? roundLabel(round, roundSeed) : "—";
   const mainLabelLong = mainLabel.length > 16;
   const glow = running && status ? GRADE_COLOR[status] : null;

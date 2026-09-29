@@ -128,10 +128,12 @@ persist in the browser via localStorage / IndexedDB, not on a server.
      note every time, shown as e.g. "C4 ↑ Major 3rd".
   2. **Continue from previous note** (the "Continue from previous note" toggle, mutually exclusive
      with "Drill every interval") — `chainedIntervalRound` starts the next round exactly on the
-     *target* note the previous round just ended on, so the display drops the starting note and
-     shows just the interval with a direction arrow (e.g. "↑ Perfect 4th") since the player is
-     already sitting on the note — `IntervalRound.showRoot` is what the label logic keys off. Falls
-     back to a fresh root (with `showRoot: true`) if the chain runs out of range to continue in.
+     *target* note the previous round just ended on, so the interval is played relative to wherever
+     the last one landed rather than a fresh root. The starting note is still always shown (e.g.
+     "F#4 ↓ Perfect 4th") even though it's the same note as the previous round's target — a chain
+     that hid it would leave no way to re-orient after a wrong note, since nothing on screen would
+     say where you actually are. Falls back to a fresh random root if the chain runs out of range to
+     continue in.
   "Drill every interval" works like Scale Trainer's "Drill every scale": every selected interval, in
   every selected direction, starting on all 12 keys, each its own random octave
   (`drillQueueForPool`); a missed round is requeued with a freshly re-rolled octave
@@ -143,6 +145,96 @@ persist in the browser via localStorage / IndexedDB, not on a server.
   (`randomIntervalRound` with that single interval/direction forced), not the full drill sweep.
   An optional "Play interval out loud" toggle (quiz mode only, not listen mode) plays both notes in
   order, spaced out, instead of a single note like the other two trainers.
+- **Guess the Interval** (`components/GuessTheInterval.tsx`, reuses `lib/intervals.ts` directly —
+  no new lib file) — the first tool in its own **"Ear Training"** sidebar category (a new entry in
+  `components/tools.tsx`'s `CATEGORIES`, between "Practice" and "Timing & Tuning"). Derived from
+  Interval Trainer but inverted: it plays an interval (melodic or harmonic — a "Playback style"
+  setting — via `lib/tones.ts`'s `playNote`) and the player picks which interval it is from a
+  multiple-choice grid, instead of playing it back on an instrument through the mic. Because
+  there's no audio input at all, it drops everything that only exists for pitch-listening (mic
+  input, tolerance/hold-time/sensitivity, partial credit, ignore-octave, ignore-repeated-notes) but
+  keeps the exact same *timing* machinery as Interval Trainer end to end — the countdown
+  ring/label, "Max time to answer"/"Time between rounds" sliders, the sound-feedback countdown
+  clicks, `roundCount`/"Drill every interval", and a timed "History" list keyed by a config only
+  attempts with matching settings compare against — `lockInRound`/`scheduleAdvance`/`advance`'s
+  finalize-then-pick-next state machine is copied over almost line for line, just with grading
+  triggered by `submitGuess(id)` (a button click, immediately correct/incorrect — no partial
+  credit, since there's no note-by-note sequence to retry) instead of `handleFrame`'s mic
+  callback. A round is always shown as "?" until graded, then reveals the interval (e.g.
+  "↑ Major 3rd", colored green/red) and, if "Reveal notes after answering" is on, the actual notes
+  played (e.g. "C4 → E4"). "Include descending intervals" still exists (a round can play the
+  interval below the start), but since guessing only asks "which interval", not "which direction",
+  the answer grid and the lifetime "Struggles" stats (`lib/struggleStats.ts`) are keyed by interval
+  alone — unlike Interval Trainer's interval-*and*-direction keying. A "Shed weak intervals"
+  session's answer choices come from whatever's actually in that session's queue rather than the
+  live pool selection, so a struggling interval that's since been deselected from "Intervals" still
+  shows up as a valid answer instead of being an un-pickable correct answer.
+  Two `react-hooks/purity` false positives (`performance.now()` inside `lockInRound`/`start`, both
+  only ever reached from a button's `onClick`, never during render — the same ref-mutation timing
+  pattern every other trainer uses) are suppressed with `eslint-disable-next-line` comments; the
+  other trainers use the identical pattern but are large/complex enough that the React Compiler
+  lint integration bails out of analyzing them before it would reach the same code, so only this
+  smaller component's version gets (harmlessly) flagged.
+- **Guess the Chord** (`components/GuessTheChord.tsx`, `lib/chords.ts`) — second tool in "Ear
+  Training". Same timed-round shape as Guess the Interval (countdown ring, max time to
+  answer/time between rounds, sound feedback, drill mode, timed History, lifetime "Struggles" +
+  "Shed weak chords"), but plays a full chord instead of an interval, and grading is a typed text
+  answer instead of a multiple-choice pick — there's no fixed candidate list to build (a real
+  simplification vs. Guess the Interval's answer-choices bug the weak-session fix had to work
+  around). `lib/chords.ts`'s `CHORD_QUALITIES` (33 qualities across 6 categories — Triads,
+  Sixths, Sevenths, Altered dominants, Extensions, Sus & add, with a smaller starter subset
+  enabled by default, same pattern as Scale Trainer's mode categories) is written in the *same*
+  plain-text quality-suffix grammar iReal Pro itself uses (`^7`, `-7`, `h7` for half-diminished,
+  `o7` for diminished, `+`, `#`/`b`, ...) — deliberately, so a chord here is typed and displayed
+  exactly the way it'd appear on a Chord Charts chart. `prettyQuality` (the `^`/`h`/`o`/`#`/`b` →
+  Δ/ø/°/♯/♭ substitution) moved from being a private helper in `ChordChart.tsx` to an export of
+  `lib/iRealPro.ts` so both this bank and the chart renderer draw a chord the same way. Typing
+  is graded, not chosen: `parseChordInput` (root letter + accidental, then a non-greedy quality
+  capture, then an optional `/bass` — the same shape as `iRealPro.ts`'s own `CHORD_RE`/
+  `splitMain`, just permissive about the quality text instead of a fixed char class) resolves
+  freeform typed text like `maj7`, `m7`, `dim`, `sus4`, `Δ7`, `ø7`, `°7` against each quality's
+  declared `aliases`, case/whitespace/punctuation-insensitively; grading
+  (`chordInputMatchesRound`) then compares root pitch class + resolved quality id + slash bass
+  pitch class (or both `null`) — enharmonic spelling doesn't matter, same as every other trainer
+  here. Deliberately does *not* accept a bare `M7` for major 7: matching is case-insensitive, so
+  there's no way to tell `M7` from `m7` apart once normalized, and `m`/`m7`/... for minor is by
+  far the more universal shorthand, so that's the one bare-letter form supported — major relies
+  on `maj7`/`^7` instead (documented both in a code comment on `ChordQuality.aliases` and in an
+  always-visible on-page hint, since it's a real gotcha for anyone typing `M7` expecting major).
+  What's typed renders live, formatted the same way (`formatChordParts` + `prettyQuality`), in
+  the same spot the revealed answer appears once graded — so "proper formatted notation" is
+  visible the whole time you're typing, not just after submitting. A chord's root is drawn from a
+  plain register choice (Low/Mid/High/Wide MIDI ranges) rather than an instrument list — a chord
+  isn't "played on an instrument" the way the other trainers' material is, so reusing the
+  Instrument dropdown wouldn't mean anything here. Slash chords aren't restricted to real
+  inversions: a "Chance of a slash chord" slider (0-100%) independently rolls *any* of the 12
+  pitch classes as the bass, so it can land on an actual chord tone (a normal inversion) or a
+  genuinely unrelated note (the "weird slash chords" the tool was asked for) with equal
+  likelihood — `buildRound` voices that bass in the octave directly under the root. A round times
+  out the same way an explicit answer works, not silently: `gradeAndReveal` (grades whatever's
+  currently typed, or "incorrect" if empty/unrecognized) runs from *both* the "Submit"/Enter path
+  and the max-time timer's `onTimeUp` callback, so running out of time still reveals the correct
+  answer through the normal `lockInRound` reveal-and-countdown pause instead of just silently
+  picking the next round — a deliberate departure from Interval/Scale Trainer's own timeout
+  behavior (which doesn't reveal anything on a miss), made because losing an answer you were
+  mid-typing without ever finding out what it was seemed like a worse loss here specifically.
+  Struggle stats (`lib/struggleStats.ts`) are keyed by quality id alone (not quality-and-slash),
+  matching Guess the Interval's keep-it-simple choice over Interval Trainer's fuller keying.
+  A "Give the root" toggle (on by default) pre-fills the answer field with the round's root the
+  instant it's shown — cursor placed right after it — so typing (and being graded on) is about
+  working out the quality/slash bass by ear, not also having to name the root; switching it off
+  clears the field instead, making the whole symbol, root included, something to work out.
+  Leaving the prefilled root untouched and submitting reads as "just typed the root" (a bare
+  major triad, the empty-quality default), which is correct only when the round genuinely is one.
+  A small "keypad" of buttons sits above the answer field (visible whenever it is) for the
+  symbols that are awkward to type, especially on a phone — minor `-`, major 7 `^`, diminished
+  `o`, half-diminished `h`, augmented `+`, `#`/`b`, `/` (slash), `sus`, `add` — each key shows its
+  `prettyQuality`-formatted glyph as the button face and inserts the plain iReal text at the
+  field's current cursor position (not just appended to the end), restoring the caret right after
+  it via a `requestAnimationFrame` (the DOM `<input>` doesn't have the just-set React state's
+  value yet the same tick a key is clicked). Each key's `onMouseDown` prevents the browser's
+  default focus-shifting-to-the-button behavior, so the answer field never visibly loses focus to
+  a keypad tap at all.
 - **Chord Charts** (`components/ChordCharts.tsx`, `components/ChordChart.tsx`,
   `lib/iRealPro.ts`) — paste an iReal Pro playlist link (the `irealb://...` links shared on the
   iReal Pro forums) and read its charts, styled to match the site. The link's chord data is
@@ -236,6 +328,20 @@ persist in the browser via localStorage / IndexedDB, not on a server.
   struggle tracking behind both trainers' "Struggles" panel — generic over the string key, so
   Note Trainer keys it by note and Scale Trainer by mode id. Reuse these before adding another
   drill/quiz-style tool.
+- `lib/tones.ts`: the "Tone" dropdown shared by Note/Scale/Interval Trainer's "Play note/scale/
+  interval out loud" and Guess the Interval's playback (`TONES`, `DEFAULT_TONE_ID`, `playNote`).
+  Each `Tone` is just an `id`/`label` plus a `play(ctx, freq, durationSeconds)` function building
+  its own Web Audio graph from scratch per note — simple waveforms (triangle/sine/square/sawtooth,
+  plus "organ"/"pluck" as hand-picked `PeriodicWave` Fourier coefficients) share one `waveTone`
+  helper, while "Piano" and "Rhodes" are their own small synthesis functions: Piano sums five
+  detuned-off-exact-integer sine partials (real strings are slightly inharmonic) through a lowpass
+  filter that sweeps darker over the note's length (a hammer strike is bright and decays duller);
+  Rhodes is 2-operator FM (a sine carrier, a sine modulator an octave up) whose modulation index
+  decays quickly from a bright attack "bark" into a smoother sustained tone. Both are synthesized,
+  not sampled — there's no audio-asset pipeline anywhere in this app (everything's synthesis or
+  the mic), so "actual instrument sounds" here means a better *model* of the instrument, not a
+  recording of one. `DEFAULT_TONE_ID` is still "triangle" (unchanged, so existing persisted
+  settings aren't affected) — Piano/Rhodes are opt-in via the Tone dropdown, not a new default.
 
 ## What's genuinely untested
 
@@ -260,9 +366,35 @@ from something that used to work:
   credit" on), the drill queue's per-key/per-octave coverage, and the "Sound feedback" click
   scheduling (a `setTimeout` per countdown second, cleared and rescheduled on every round change).
 - Interval Trainer listen mode: same live-pitch-grading machinery again, plus its own untested
-  bits — "Continue from previous note" chaining actually starting each round on the prior round's
-  target note rather than drifting, and whether the "no starting note shown" display reads clearly
-  in practice for a chained round.
+  bit — "Continue from previous note" chaining actually starting each round on the prior round's
+  target note rather than drifting.
+- Guess the Interval: whether the played interval's pitch actually matches what's shown once
+  revealed (`playNote`/`lib/tones.ts`), the melodic-vs-harmonic playback timing (two `playNote`
+  calls fired simultaneously for harmonic isn't something that's been heard), and the same
+  countdown-timing machinery inherited from Interval Trainer (the sound-feedback click scheduling,
+  answering early re-syncing the round timer).
+- Guess the Chord: everything above, plus its own untested bits — whether a played chord's block
+  vs. arpeggio voicing (all the notes at once, several simultaneous oscillators through
+  `playNote`) actually sounds like one coherent chord rather than mush, especially on the bigger
+  qualities (13th chords are 7 simultaneous notes); whether a fully random slash bass (not
+  restricted to an actual chord tone) is musically legible enough to identify by ear at all,
+  versus just sounding like noise under the chord; and the typed-answer flow end to end — the
+  live-formatting preview while typing, submitting via Enter vs. the Submit button, and the
+  timeout path (`onTimeUp` → `gradeAndReveal` → the same `lockInRound` reveal pause an explicit
+  answer gets) actually behaving the way the code reads; plus, since this section was last
+  written, the "Give the root" prefill (whether the caret really lands after the prefilled text
+  rather than before/inside it — `setSelectionRange` after a `useEffect`, not something provable
+  without a real focused `<input>` in a real browser) and the symbol keypad (whether a tap really
+  inserts at the caret without stealing focus, across actual touch/mouse input rather than the
+  synthetic string-splicing check that's all `insertSymbol`'s logic itself got). None of this is
+  something this sandbox's lack of a browser can confirm beyond the synthetic parser/round-
+  generation/prefill checks already run against `lib/chords.ts` directly.
+- `lib/tones.ts`'s "Piano" and "Rhodes" tones: entirely untested by ear — the synthesis (partial
+  gains/ratios, filter sweep, FM modulation index/decay time) was only checked structurally, with
+  a mocked Web Audio graph asserting the right nodes get created/connected/started with sane
+  values, never against what it actually sounds like or how loud it is next to the older tones
+  (whose gain constants were themselves presumably ear-tuned at some point). Likely needs a
+  balance pass once someone can actually listen.
 - Tuner: the tone generator and the per-instrument string tunings.
 - Polyrhythm Metric Modulation Metronome: the bar-boundary detection driving each
   modulation (relies on the

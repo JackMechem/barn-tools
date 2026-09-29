@@ -64,6 +64,20 @@ export type IRealPlaylist = { name: string; songs: IRealSong[] };
 
 const CHORD_RE = /^[A-GW][-+^0-9hob#suadlt]*(\/[A-G][b#]?)?/;
 
+/** iReal's plain-text quality suffix ("^7", "h7", "o7", ...) to the glyphs it's actually printed
+    with — Δ for major 7, ø for half-diminished, ° for diminished, plus sharp/flat. Shared by
+    Chord Charts (`ChordChart.tsx`'s `ChordLabel`) and Guess the Chord (`lib/chords.ts`, whose
+    chord bank deliberately reuses this exact suffix grammar), so a chord looks the same wherever
+    it's drawn in this app. */
+export function prettyQuality(quality: string): string {
+  return quality
+    .replace(/\^/g, "Δ")
+    .replace(/h/g, "ø")
+    .replace(/o/g, "°")
+    .replace(/#/g, "♯")
+    .replace(/b/g, "♭");
+}
+
 function splitMain(main: string): {
   letter: string;
   accidental?: "b" | "#";
