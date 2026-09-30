@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import SwitchRow from "@/components/SwitchRow";
+import ChordSymbolKeypad from "@/components/ChordSymbolKeypad";
 import Hint from "@/components/Hint";
 import ToolLayout from "@/components/ToolLayout";
 import KeyHint from "@/components/KeyHint";
@@ -80,24 +81,6 @@ type PlaybackStyle = "block" | "arpeggio";
 const PLAYBACK_STYLES: { value: PlaybackStyle; label: string }[] = [
   { value: "block", label: "Block (all notes at once)" },
   { value: "arpeggio", label: "Arpeggio (quick roll)" },
-];
-
-/** A little on-screen keypad above the answer field for the symbols that aren't obvious or easy
-    to type (especially on a phone keyboard) — inserted as the plain iReal-style text
-    (`parseChordInput`/`normalizeQualityText` both read `^`/`h`/`o`/`#`/`b` directly, no need to
-    insert the pretty glyph itself), with the glyph shown on the key as a preview of how it'll
-    end up formatted. */
-const SYMBOL_KEYS: { insert: string; caption: string; title: string }[] = [
-  { insert: "-", caption: "minor", title: "Minor" },
-  { insert: "^", caption: "maj7", title: "Major 7" },
-  { insert: "o", caption: "dim", title: "Diminished" },
-  { insert: "h", caption: "half-dim", title: "Half-diminished" },
-  { insert: "+", caption: "aug", title: "Augmented" },
-  { insert: "#", caption: "sharp", title: "Sharp" },
-  { insert: "b", caption: "flat", title: "Flat" },
-  { insert: "/", caption: "bass", title: "Slash (bass note)" },
-  { insert: "sus", caption: "sus", title: "Suspended" },
-  { insert: "add", caption: "add", title: "Add" },
 ];
 
 /** Which octave a round's root is drawn from — a chord isn't "played on an instrument" the way
@@ -435,9 +418,7 @@ export default function GuessTheChord() {
     const pauseMs = cfgRef.current.advanceDelayMs;
     // Only ever reached from gradeAndReveal (a form submit, the "I don't know" button, or the
     // max-time timer), never during render — same ref-mutation timing pattern every trainer here
-    // uses; see the identical note in Guess the Interval's lockInRound for why this specific
-    // component is what the purity check happens to reach.
-    // eslint-disable-next-line react-hooks/purity -- see comment above; not called during render
+    // uses.
     noteTimerRef.current = { startedAt: performance.now(), durationMs: pauseMs };
     if (cfgRef.current.soundFeedback) {
       playClick();
@@ -536,7 +517,6 @@ export default function GuessTheChord() {
     };
     // Only ever reached from start() itself (a button's onClick, or a space-bar toggle) — not
     // called during render.
-    // eslint-disable-next-line react-hooks/purity -- see comment above; not called during render
     sessionStartRef.current = performance.now();
 
     const seconds = Math.max(MIN_ROUND_SECONDS, roundSeconds);
@@ -1114,25 +1094,8 @@ export default function GuessTheChord() {
 
         {running && round && !status && (
           <form onSubmit={submitAnswer} className="flex w-full flex-col items-center gap-2">
-            <div className="flex max-w-[18rem] flex-wrap justify-center gap-1">
-              {SYMBOL_KEYS.map((key) => (
-                <button
-                  key={key.insert}
-                  type="button"
-                  title={key.title}
-                  aria-label={key.title}
-                  // Keeps focus (and the selection) on the answer field the whole time, instead
-                  // of the browser's default of shifting focus to the button on mousedown.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => insertSymbol(key.insert)}
-                  className="flex min-w-[2.25rem] flex-col items-center gap-0.5 rounded-lg bg-background px-2 py-1 hover:bg-surface-hover"
-                >
-                  <span className="text-base font-semibold leading-none">
-                    {prettyQuality(key.insert)}
-                  </span>
-                  <span className="text-[0.6rem] leading-none text-muted">{key.caption}</span>
-                </button>
-              ))}
+            <div className="w-full max-w-[18rem]">
+              <ChordSymbolKeypad onInsert={insertSymbol} />
             </div>
             <input
               ref={inputElRef}

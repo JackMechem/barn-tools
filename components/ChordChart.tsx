@@ -41,7 +41,7 @@ import {
 // weight of it, though, so there's no lighter cut to switch to if it still reads too heavy once
 // actually seen rendered; a non-variable OTF's stroke weight can't be thinned further through CSS
 // `font-weight` the way a variable font's could.
-const chordFont = localFont({ src: "./fonts/petaluma/PetalumaScript.otf" });
+export const chordFont = localFont({ src: "./fonts/petaluma/PetalumaScript.otf" });
 // Only ever used for the two SMuFL chord-symbol glyphs `QualityText` substitutes in — never applied
 // to a whole chord label the way `chordFont` is.
 const chordSymbolFont = localFont({ src: "./fonts/petaluma/Petaluma.otf" });
@@ -85,11 +85,11 @@ function QualityText({ quality }: { quality: string }) {
 // measured and uniformly scaled to fit inside a single page-shaped box (`PageFit`), however many
 // rows it takes. That's what actually answers "the whole chart, regardless of length, should fit
 // without scrolling."
-const COL_WIDTH = "7.5rem";
-const BAR_HEIGHT = "5.25rem";
+export const COL_WIDTH = "7.5rem";
+export const BAR_HEIGHT = "5.25rem";
 const ROOT_SIZE = "2.25rem";
 const ROOT_ACCIDENTAL_SIZE = "1.1rem";
-const QUALITY_SIZE = "1.4rem";
+export const QUALITY_SIZE = "1.4rem";
 const BASS_SIZE = "1.1rem";
 const REPEAT_SIZE = "1.75rem";
 const SYMBOL_SIZE = "1.1rem";
@@ -455,8 +455,9 @@ function BarCell({
 /** The stacked top/bottom time signature (e.g. "4" over "4") drawn just before the chart's very
     first chord, the way iReal Pro always shows it, sitting as an ordinary flex sibling of the
     chord label inside that one bar cell — it costs that bar some of its own room for the chord
-    symbol rather than adding an extra column. */
-function TimeSignatureGlyph({
+    symbol rather than adding an extra column. Exported for `ChordChartEditor.tsx`'s own bar grid,
+    so its first bar shows the same time-signature glyph a real rendered chart's does. */
+export function TimeSignatureGlyph({
   timeSignature,
 }: {
   timeSignature: { top: number; bottom: number };
@@ -518,8 +519,9 @@ function BarContent({ bar }: { bar: Bar }) {
     stops overflowing the bar. Renders at natural size (no transform) until it actually doesn't
     fit. Orthogonal to `PageFit` above (which scales the *whole chart*) — this handles the
     narrower case of one bar with more chords crammed into it than its own fixed `COL_WIDTH` can
-    comfortably hold at natural size. */
-function FitChordRow({ children }: { children: React.ReactNode }) {
+    comfortably hold at natural size. Exported for `ChordChartEditor.tsx`'s own bar grid, which
+    reuses this same overflow behavior for a bar with several typed chords in it. */
+export function FitChordRow({ children }: { children: React.ReactNode }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
@@ -563,7 +565,10 @@ const ACCIDENTAL_GLYPH: Record<"b" | "#", string> = { b: "♭", "#": "♯" };
 // resolve against whatever font-size this label happens to inherit — not against the root's own
 // (much larger) size — which is exactly why they used to stay illegibly small no matter how big
 // that `em` value got. Explicit, independently-set sizes sidestep that entirely.
-function ChordLabel({ slot }: { slot: ChordSlot }) {
+//
+// Exported for `ChordChartEditor.tsx`'s own bar grid, so a bar not currently being typed into
+// renders through this exact same function — not a second approximation of it.
+export function ChordLabel({ slot }: { slot: ChordSlot }) {
   if (slot.kind === "nc") {
     return (
       <span

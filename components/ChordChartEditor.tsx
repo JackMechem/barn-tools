@@ -1,7 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import ChordChart from "@/components/ChordChart";
+import { useEffect, useRef, useState } from "react";
+import {
+  BAR_HEIGHT,
+  chordFont,
+  ChordLabel,
+  COL_WIDTH,
+  FitChordRow,
+  QUALITY_SIZE,
+  TimeSignatureGlyph,
+} from "@/components/ChordChart";
+import ChordSymbolKeypad from "@/components/ChordSymbolKeypad";
 import NumberField from "@/components/NumberField";
 import { PlusIcon, TrashIcon } from "@/components/tools";
 import { encodeChartString } from "@/lib/chartString";
@@ -11,15 +20,19 @@ const STARTING_BARS = 4;
 
 /** A from-scratch chord chart builder — deliberately simple (a flat list of bars, no repeats,
     endings, sections, or directives the way a pasted iReal chart can have) rather than a full
-    editor for every notation feature `ChordChart.tsx` can render. Each bar is typed as plain
-    text in the exact iReal-style shorthand this app already uses everywhere else (Guess the
-    Chord's chord bank, every pasted chart) — `lib/iRealPro.ts`'s `parseBarSlots`, not a separate
-    per-field chord picker — so there's one notation to learn, not two, and the live preview here
-    is the same `ChordChart` renderer used everywhere else in this tool, not a separate
-    approximation of it. A song built here can be saved straight into the library (the same
-    `importSongs` "Import a playlist" itself calls, in a playlist named after the chart's own
-    title) or exported as a `jackshed://` chart link (`lib/chartString.ts`) to share or re-import
-    elsewhere — the only two ways a chart leaves this modal. */
+    editor for every notation feature `ChordChart.tsx` can render. Typing happens directly on the
+    chart itself, the same way a maximized chart looks: bars sit in the same fixed-size,
+    barlined grid `ChordChart.tsx` renders (`COL_WIDTH`/`BAR_HEIGHT`, the same Petaluma font,
+    the same `ChordLabel`/`FitChordRow`/`TimeSignatureGlyph` those exports are), so there's no
+    separate "preview" pane mirroring a plain form — the bars *are* the preview, live, the moment
+    you click away from one. Each bar is typed in the exact iReal-style shorthand this app already
+    uses everywhere else (Guess the Chord's chord bank, every pasted chart) — `parseBarSlots`, not
+    a separate per-field chord picker — plus a small symbol keypad (`ChordSymbolKeypad`, shared
+    with Guess the Chord's own answer field) for the marks that aren't obvious to type by hand. A
+    song built here can be saved straight into the library (the same `importSongs` "Import a
+    playlist" itself calls, in a playlist named after the chart's own title) or exported as a
+    `jackshed://` chart link (`lib/chartString.ts`) to share or re-import elsewhere — the only two
+    ways a chart leaves this modal. */
 export default function ChordChartEditor({
   onSave,
   onClose,
@@ -35,6 +48,19 @@ export default function ChordChartEditor({
   const [bottom, setBottom] = useState(4);
   const [bars, setBars] = useState<string[]>(() => Array(STARTING_BARS).fill(""));
 
+  // Which bar is currently "open" — shown as a plain-text input (raw shorthand) instead of its
+  // rendered chord symbols, and where the keypad inserts. Persists once set (clicking elsewhere
+  // on the page, e.g. the Title field, doesn't quietly revert it) — only clicking a *different*
+  // bar, adding one, or stepping to the next with Enter ever moves it. Always a valid index, never
+  // `null`: there's always exactly one "current" bar, the same way a text cursor always sits
+  // somewhere, so the keypad always has somewhere to insert into.
+  const [activeIndex, setActiveIndex] = useState(0);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  // Set right before a bar is added or a different one is clicked into; a `useEffect` (below)
+  // focuses that bar's <input> once it's actually rendered as one (it doesn't exist in the DOM
+  // yet the same tick `setActiveIndex` is called), then clears this.
+  const focusIndexRef = useRef<number | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exported, setExported] = useState<string | null>(null);
@@ -48,6 +74,13 @@ export default function ChordChartEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  useEffect(() => {
+    const i = focusIndexRef.current;
+    if (i === null) return;
+    focusIndexRef.current = null;
+    inputRefs.current[i]?.focus();
+  }, [activeIndex, bars.length]);
+
   const song: IRealSong = {
     title: title.trim(),
     composer: composer.trim(),
@@ -60,11 +93,58 @@ export default function ChordChartEditor({
   function updateBar(index: number, text: string) {
     setBars((prev) => prev.map((t, i) => (i === index ? text : t)));
   }
-  function removeBar(index: number) {
-    setBars((prev) => prev.filter((_, i) => i !== index));
+
+  function activateBar(index: number) {
+    focusIndexRef.current = index;
+    setActiveIndex(index);
   }
+
   function addBar() {
+    const newIndex = bars.length;
+    focusIndexRef.current = newIndex;
+    setActiveIndex(newIndex);
     setBars((prev) => [...prev, ""]);
+  }
+
+  function removeBar(index: number) {
+    if (bars.length <= 1) return;
+    const next = bars.filter((_, i) => i !== index);
+    setBars(next);
+    setActiveIndex((i) => Math.min(i, next.length - 1));
+  }
+
+  /** Pressing Enter in the last bar adds a new one and jumps straight into it, so typing a whole
+      chart can stay a straight line of "type, Enter, type, Enter..." without reaching for the "Add
+      bar" button each time. In any other bar, Enter just jumps to the next one. Escape, deliberately,
+      does *not* bubble up to this modal's own Escape-closes-everything handler here (`stopPropagation`)
+      — it only blurs the current bar, since losing the whole chart because Escape was meant to back
+      out of one bar's edit would be a bad trade. */
+  function handleBarKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (index === bars.length - 1) addBar();
+      else activateBar(index + 1);
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      e.currentTarget.blur();
+    }
+  }
+
+  /** Inserts a keypad key's text at the active bar's current cursor position — identical logic to
+      Guess the Chord's own `insertSymbol`, just targeting whichever bar is currently active instead
+      of a single fixed answer field. */
+  function insertSymbol(text: string) {
+    const el = inputRefs.current[activeIndex];
+    const current = bars[activeIndex] ?? "";
+    const start = el?.selectionStart ?? current.length;
+    const end = el?.selectionEnd ?? current.length;
+    const next = current.slice(0, start) + text + current.slice(end);
+    updateBar(activeIndex, next);
+    const pos = start + text.length;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(pos, pos);
+    });
   }
 
   async function handleSave() {
@@ -186,54 +266,46 @@ export default function ChordChartEditor({
           </div>
         </div>
 
-        <div className="flex flex-col gap-4 lg:flex-row">
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <h3 className="text-sm font-semibold text-foreground">Bars</h3>
-            <p className="text-xs text-muted">
-              Type each bar&apos;s chords like <code>C^7</code>, <code>F-7</code>,{" "}
-              <code>Bb7#5/D</code>, or <code>NC</code> for no chord — leave a bar blank for empty
-              space. Two chords in one bar: separate with a space, like <code>C^7 A7</code>.
-            </p>
-            <div className="flex max-h-80 flex-col gap-1.5 overflow-y-auto pr-1">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted">
+            Click a bar to type its chords — <code>C^7</code>, <code>F-7</code>,{" "}
+            <code>Bb7#5/D</code>, <code>NC</code> for no chord, or two chords separated by a
+            space. Press Enter to move to the next bar.
+          </p>
+          <div className="overflow-x-auto rounded-2xl bg-background p-3">
+            <div className="flex w-max flex-wrap">
               {bars.map((text, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="w-6 shrink-0 text-right text-xs tabular-nums text-muted">
-                    {i + 1}
-                  </span>
-                  <input
-                    value={text}
-                    onChange={(e) => updateBar(i, e.target.value)}
-                    placeholder="C^7"
-                    className="min-w-0 flex-1 rounded-lg bg-background px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  />
-                  <button
-                    type="button"
-                    aria-label={`Remove bar ${i + 1}`}
-                    onClick={() => removeBar(i)}
-                    disabled={bars.length <= 1}
-                    className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-surface-hover hover:text-danger disabled:opacity-30"
-                  >
-                    <TrashIcon className="h-4 w-4" />
-                  </button>
-                </div>
+                <BarCellEditor
+                  key={i}
+                  index={i}
+                  text={text}
+                  isActive={activeIndex === i}
+                  isFirst={i === 0}
+                  isLast={i === bars.length - 1}
+                  canRemove={bars.length > 1}
+                  timeSignature={i === 0 ? { top, bottom } : undefined}
+                  onActivate={() => activateBar(i)}
+                  onChange={(t) => updateBar(i, t)}
+                  onRemove={() => removeBar(i)}
+                  onKeyDown={(e) => handleBarKeyDown(i, e)}
+                  inputRef={(el) => {
+                    inputRefs.current[i] = el;
+                  }}
+                />
               ))}
-            </div>
-            <button
-              type="button"
-              onClick={addBar}
-              className="flex items-center justify-center gap-1.5 self-start rounded-lg bg-background px-3 py-1.5 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground"
-            >
-              <PlusIcon className="h-4 w-4" />
-              Add bar
-            </button>
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <h3 className="mb-2 text-sm font-semibold text-foreground">Preview</h3>
-            <div className="rounded-2xl bg-background p-3">
-              <ChordChart song={song} barsPerRow={4} />
+              <button
+                type="button"
+                onClick={addBar}
+                aria-label="Add bar"
+                title="Add bar"
+                className="flex shrink-0 items-center justify-center text-muted hover:bg-surface-hover hover:text-foreground"
+                style={{ width: "3.5rem", height: BAR_HEIGHT }}
+              >
+                <PlusIcon className="h-5 w-5" />
+              </button>
             </div>
           </div>
+          <ChordSymbolKeypad onInsert={insertSymbol} />
         </div>
 
         {error && <p className="text-sm text-danger">{error}</p>}
@@ -278,6 +350,97 @@ export default function ChordChartEditor({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One bar, styled and sized exactly like `ChordChart.tsx`'s own `BarCell` (the same `COL_WIDTH`/
+    `BAR_HEIGHT`/barline treatment), so the grid this builds reads as "the chart," not a form. Not
+    active: shows its chords rendered through the real `ChordLabel`/`FitChordRow` — the same
+    components the actual chart uses — or a faint dot if it's still blank. Active: a plain-text
+    `<input>` showing the raw shorthand, so what's actually being typed is visible while you type
+    it (auto-converting it live into the pretty symbols mid-keystroke would fight the cursor). */
+function BarCellEditor({
+  index,
+  text,
+  isActive,
+  isFirst,
+  isLast,
+  canRemove,
+  timeSignature,
+  onActivate,
+  onChange,
+  onRemove,
+  onKeyDown,
+  inputRef,
+}: {
+  index: number;
+  text: string;
+  isActive: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  canRemove: boolean;
+  timeSignature?: { top: number; bottom: number };
+  onActivate: () => void;
+  onChange: (text: string) => void;
+  onRemove: () => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  inputRef: (el: HTMLInputElement | null) => void;
+}) {
+  const leftBorder = isFirst ? "border-l-4 border-foreground" : "border-l border-muted/40";
+  const rightBorder = isLast ? "border-r-4 border-foreground" : "border-r border-muted/40";
+  const slots = parseBarSlots(text);
+
+  return (
+    <div
+      className={`group relative flex shrink-0 items-center justify-center gap-1 px-0.5 ${leftBorder} ${rightBorder}`}
+      style={{ width: COL_WIDTH, height: BAR_HEIGHT }}
+    >
+      <span className="pointer-events-none absolute left-1 top-1 text-[0.6rem] tabular-nums text-muted/50">
+        {index + 1}
+      </span>
+      {canRemove && (
+        <button
+          type="button"
+          aria-label={`Remove bar ${index + 1}`}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-muted opacity-0 hover:bg-surface-hover hover:text-danger group-hover:opacity-100"
+        >
+          <TrashIcon className="h-3 w-3" />
+        </button>
+      )}
+      {timeSignature && <TimeSignatureGlyph timeSignature={timeSignature} />}
+      {isActive ? (
+        <input
+          ref={inputRef}
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="C^7"
+          className={`w-full min-w-0 bg-transparent text-center outline-none ${chordFont.className}`}
+          style={{ fontSize: QUALITY_SIZE }}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={onActivate}
+          className="flex h-full w-full min-w-0 items-center justify-center"
+        >
+          {slots.length > 0 ? (
+            <FitChordRow>
+              {slots.map((slot, i) => (
+                <ChordLabel key={i} slot={slot} />
+              ))}
+            </FitChordRow>
+          ) : (
+            <span className="text-muted/40">·</span>
+          )}
+        </button>
+      )}
     </div>
   );
 }
