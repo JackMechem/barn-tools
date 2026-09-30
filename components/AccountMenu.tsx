@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useQuery } from "convex/react";
 import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { api } from "@/convex/_generated/api";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import { GoogleIcon, UserIcon } from "@/components/tools";
 
 /** Same button shape as Sidebar's ThemeButton (collapsed/large props, identical styling) so this
@@ -293,7 +294,7 @@ export default function AccountMenu({
     return (
       <span className={buttonClass(collapsed, large)}>
         <UserIcon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
-        {!collapsed && <span className="truncate">…</span>}
+        {!collapsed && <LoadingSpinner size="sm" inline label="Signing in" />}
       </span>
     );
   }

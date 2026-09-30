@@ -40,6 +40,22 @@
   --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* Drives components/LoadingSpinner.tsx's dots — each one uses this same animation, staggered
+     via its own animation-delay, so only the keyframes need to live here. */
+  --animate-loading-dot: loading-dot 1s ease-in-out infinite;
+}
+
+@keyframes loading-dot {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0.35;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 body {

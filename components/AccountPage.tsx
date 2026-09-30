@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAction, useQuery } from "convex/react";
 import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { api } from "@/convex/_generated/api";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import { GoogleIcon, LogOutIcon, ShieldIcon, TrashIcon, UserIcon } from "@/components/tools";
 
 /** `wide` widens the page to fit the Profile/Security/Danger zone sidebar layout (the signed-in
@@ -594,7 +595,7 @@ export default function AccountPage() {
   if (isLoading) {
     return (
       <PageShell>
-        <p className="text-sm text-muted">Loading…</p>
+        <LoadingSpinner />
       </PageShell>
     );
   }

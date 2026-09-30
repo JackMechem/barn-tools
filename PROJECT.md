@@ -676,6 +676,26 @@ the only way around that prompt, not a flag).
 
 ## Shared conventions — reuse these before writing something new
 
+- `components/LoadingSpinner.tsx`: the one shared "something's loading" indicator — a small row of
+  circles, one lit up at a time in a loop, styled after (and directly requested to be modeled on)
+  the metronome's own beat-circle display (`components/BeatIndicator.tsx`), but driven by a
+  looping CSS animation (`@keyframes loading-dot` + a `--animate-loading-dot` token, both in
+  `app/globals.css` — Tailwind v4's `@theme` convention for a custom animation utility) rather than
+  real beat timing, since there's no tempo to follow here. `size` (`sm`/`md`/`lg`), `inline` (sits
+  mid-sentence instead of as its own block), and `showLabel` (also renders `label` as visible text
+  next to the dots, for a spot specific enough that a sighted user benefits from knowing *what's*
+  loading, not just that something is — e.g. Recorder's "Finishing recording…"; when off, `label`
+  is still the accessible name via `role="status"`/`aria-label`, just not shown). Reach for this
+  instead of a bare "Loading…" string or a one-off spinner — swapped into every place that already
+  had one: `AccountPage.tsx` (the whole "is anyone signed in yet" gate), `AccountMenu.tsx` (the
+  sidebar button's brief placeholder before that resolves), `PracticeTimer.tsx` (saved sessions
+  loading from the account), and `Recorder.tsx` (loading a saved project from IndexedDB, and — a
+  spot that had no loading feedback at all before this, just a disabled record button — finishing
+  the post-recording burst-tone alignment processing). **Deliberately not** threaded into every
+  `useSyncedSettings`/`useSyncedTunes` consumer, even though those *are* "waiting on the server" in
+  a literal sense: that hook returns `defaults` while its first Convex read is pending specifically
+  so call sites don't need a loading state to use it at all (see its own doc comment) — adding a
+  spinner there would undo that design, not extend it.
 - `components/ToolLayout.tsx`: the page shell every tool uses. `layout="split"` gives a
   hideable options column (the eye icon); `layout="stacked"` (Slow Downer, Recorder) is
   full-width with options in one card below. Takes `help={<HelpButton .../>}` for a controls

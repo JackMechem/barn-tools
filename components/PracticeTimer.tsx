@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import Hint from "@/components/Hint";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import NumberField from "@/components/NumberField";
 import PanelsToggle from "@/components/PanelsToggle";
 import Select from "@/components/Select";
@@ -525,7 +526,7 @@ export default function PracticeTimer() {
         <div className="flex w-full flex-col items-center gap-4 text-center">
           <StopwatchIcon className="h-12 w-12 text-muted" />
           {loading ? (
-            <p className="text-muted">Loading…</p>
+            <LoadingSpinner />
           ) : sessions.length === 0 ? (
             <p className="max-w-xs text-muted">
               Create a session to get started — chain timers back to back, or run a Pomodoro.

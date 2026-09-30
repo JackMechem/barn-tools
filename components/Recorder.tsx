@@ -8,6 +8,7 @@ import ContextMenu, { MenuItem, MenuState } from "@/components/ContextMenu";
 import HelpButton, { HelpGroup } from "@/components/HelpButton";
 import Hint from "@/components/Hint";
 import KeyHint from "@/components/KeyHint";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import NumberField from "@/components/NumberField";
 import Select from "@/components/Select";
 import SwitchRow from "@/components/SwitchRow";
@@ -2137,7 +2138,8 @@ export default function Recorder() {
         </div>
       </div>
 
-      {loadingProject && <p className="text-sm text-muted">Loading project…</p>}
+      {loadingProject && <LoadingSpinner label="Loading project…" showLabel />}
+      {finishing && <LoadingSpinner label="Finishing recording…" showLabel />}
 
       {tracks.length === 0 ? (
         <div className="flex w-full max-w-md flex-1 flex-col items-center justify-center gap-3 py-6">
