@@ -212,35 +212,6 @@ export function TunerIcon({ className }: { className?: string }) {
   );
 }
 
-export function BarnLogo({ className }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden
-      viewBox="0 0 64 64"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M6 30L32 8l26 22" />
-      <path d="M11 26v30h42V26" />
-      <rect
-        x="22"
-        y="34"
-        width="20"
-        height="22"
-        rx="1"
-        fill="currentColor"
-        fillOpacity="0.15"
-      />
-      <path d="M22 34l20 22M42 34L22 56" />
-      <path d="M32 26v.01" strokeWidth="5" />
-    </svg>
-  );
-}
-
 export function EyeIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>
@@ -438,12 +409,33 @@ export function StarIcon({ className, filled }: { className?: string; filled?: b
   );
 }
 
+export function GlobeIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 010 18 14 14 0 010-18z" />
+    </svg>
+  );
+}
+
+export function UsersIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0113 0" />
+      <path d="M15.5 5.5a3.5 3.5 0 010 6.8" />
+      <path d="M17.5 13.5a6.5 6.5 0 014 6.5" />
+    </svg>
+  );
+}
+
 /** Groups tools in the sidebar and search; also fixes their display order. */
 export const CATEGORIES = [
   "Practice",
   "Ear Training",
   "Timing & Tuning",
   "Audio",
+  "Community",
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 
@@ -553,6 +545,14 @@ export const NAV_LINKS = [
     category: "Audio" as Category,
     /** Needs a desktop-sized screen; it's greyed out in the mobile menu. */
     desktopOnly: true,
+  },
+  {
+    href: "/community",
+    label: "Community",
+    description:
+      "Search public profiles for other musicians — see what they play and which tunes they know.",
+    icon: UsersIcon,
+    category: "Community" as Category,
   },
 ];
 

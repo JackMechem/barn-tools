@@ -365,8 +365,59 @@ what exists, what's next, and the honest state of what's been verified.
   trick (`lib/syncBurst.ts`), a "align to beat" pitch-based nudge (`lib/alignBeat.ts`), WAV
   export/mixdown. **Desktop-only** — greyed out on phones via `desktopOnly` in
   `components/tools.tsx`'s `NAV_LINKS`.
-- **Home** (`app/page.tsx` / `components/Home.tsx`) — just the logo/name and a "press / to
-  search" hint; not itself in the nav list (the logo links to it instead).
+- **Community** (`components/Community.tsx`, `app/community/page.tsx`) — this app's first public,
+  social feature; a new `"Community"` `NAV_LINKS` category on its own, reachable (like every other
+  page here) without an account. Has its own left sidebar — Search / Following — using the exact
+  same `SidebarNavButton` (`components/SidebarNavButton.tsx`, pulled out of `/account`'s own
+  sidebar into a shared component) `/account` itself uses, per a direct request to give this page
+  "the same sidebar thing." **Search** is a username-only search box (not instrument/tune — an
+  explicit scoping call) over every `isPublic` profile, via `convex/profiles.ts`'s `search` — a
+  plain scan-and-filter over public profiles rather than a real search index, since this is a small
+  personal-project directory, not a large-scale service. **Following** reuses `FollowLists`
+  wholesale (the same component `/account`'s own Following tab renders — both who you follow and
+  who follows you), per a direct follow-up request for "a section for people you follow" here too,
+  not just on the account page. Since this page (unlike `/account`) is reachable signed out,
+  `Community` gates that view itself — `useConvexAuth()`'s `isLoading`/`isAuthenticated` picks
+  between a loading spinner, `FollowLists`, or a "sign in to see who you follow" prompt — rather
+  than mounting `FollowLists` unconditionally: that component's own `useQuery(api.users.current)`
+  gate only checks for "still loading" (`user === undefined`), not "definitely signed out"
+  (`user === null`), so mounting it while signed out would leave its lists stuck spinning forever;
+  `/account` never hit this because that whole page is already gated behind being signed in before
+  any tab, including Following, ever renders. See "Public profiles & follows" under Backend
+  (Convex) below for the whole feature — the public profile page itself
+  (`app/u/[username]/page.tsx`) isn't a "tool" with a nav entry of its own, just what a Community
+  search result (or a shared link) leads to.
+- **Home** (`app/page.tsx` / `components/Home.tsx`) — an actual landing page, not a tool directory.
+  Went through two very different designs this session: the first rendered every `NAV_LINKS` entry
+  as an icon-card grid, grouped by category via the sidebar/command palette's own `groupByCategory`
+  helper — a genuinely complete site overview, but one that read like generated documentation
+  (a wall of identical cards) rather than a page meant to make a case for the site. Per a direct
+  follow-up request to redo it as a real, "somewhat artistic" landing page instead — and
+  specifically not "obviously AI generated" — it's a short, editorial single column now: a big
+  two-tone "jack**shed**" wordmark (the "shed" in accent color, no gradient text, no icon logo —
+  see below); a hand-picked, fixed-array waveform-bar strip under the hero (`WAVEFORM`, tuned by
+  hand rather than `Math.random()`'d at render time, which would be a real hydration mismatch — the
+  same class of bug `CollapsiblePanel.tsx`'s own "always render the chevron" comment warns about
+  elsewhere in this app); a short first-person paragraph in Jack's own voice about *why* this exists
+  (styled as a blockquote — a left accent border, not a boxed card) instead of impersonal marketing
+  copy; and a curated "A few favorites" list of five of the ~14 tools (not all of them — picked for
+  range: a practice tool, an ear trainer, a novelty metronome, a chart reader, and the recorder),
+  each written up as its own real sentence with a large faint index numeral (01–05, alternately
+  indented for a less perfectly-gridded rhythm) rather than reduced to an icon and a
+  three-word fragment. Every tool is still fully reachable — nothing was removed, just no longer
+  duplicated on this page — via the sidebar and the `/` command palette, which is what `NAV_LINKS`
+  is actually for. Closes with one quiet line about accounts being entirely optional (linking to
+  `/community`) instead of a separate "Ready to get started?" CTA banner, and the same footer as
+  before. There's no separate icon logo anywhere in the app anymore either, per an earlier follow-up
+  request in this same session — the old hand-drawn barn-roof SVG, `BarnLogo` in
+  `components/tools.tsx`, was deleted outright (not just unmounted), along with its icon-box wrapper
+  in both the desktop and mobile sidebar headers — the "jackshed" text itself is the logo
+  everywhere now. Shows "Welcome back, {name}" above the title once signed in — `user.name` (only
+  ever set by Google sign-in) if there is one, `user.email` otherwise, since every account has one
+  or the other but not necessarily both, same fallback order this app already uses elsewhere for a
+  short signed-in label (`AccountMenu.tsx`'s collapsed button, `AccountPage.tsx`'s own subtitle).
+  Gated on both `useConvexAuth()`'s `isAuthenticated` and the `api.users.current` query actually
+  resolving, so a signed-in visitor never sees a flash of the signed-out version first.
 - **Privacy Policy / Terms of Service** (`app/privacy/page.tsx`, `app/terms/page.tsx`,
   `components/LegalPage.tsx`) — plain prose pages, not tools (no `ToolLayout`), and plain Server
   Components (no `"use client"` anywhere in either — no interactivity needed). Linked from
@@ -711,6 +762,148 @@ the only way around that prompt, not a flag).
   free SHA-256 hashing) and that every new Convex function type-checks and deploys — nothing about
   an actual email ever having been sent or received.
 
+**Public profiles & follows** — this app's first genuinely public, social feature (see the
+Community bullet in the tools list above), and its first-ever file upload. Two new tables:
+- `profiles` (`convex/profiles.ts`) — one row per user: `username` (always lowercased, both stored
+  and displayed — no separate display-case, so there's never a "@JohnSmith" vs. "@johnsmith"
+  ambiguity to reason about; validated by `lib/username.ts`'s `usernameError`/`normalizeUsername`,
+  the same functions used client-side for instant feedback and server-side as the actual
+  source-of-truth check — client validation is never trusted alone), `avatarStorageId` (a Convex
+  file-storage reference — see below), `instruments` (free text, not `lib/instruments.ts`'s
+  `INSTRUMENTS` catalog — that list is range-specific for the note trainers, a poor semantic fit
+  for "what do you play"; `lib/profileInstruments.ts`'s `COMMON_INSTRUMENTS` drives autocomplete
+  only, never validated against), and `isPublic`. Nothing on a profile is visible to anyone but its
+  owner while `isPublic` is false. `knownTuneIds` (`v.optional`, unused) is a deprecated leftover
+  from an earlier design — see the tune-lists paragraph below for why it's gone.
+- `follows` (`convex/follows.ts`) — one row per `(followerId, followingId)` pair; `follow` checks
+  for an existing row first so it's idempotent, never a duplicate. Both Following and Followers
+  show on a profile — gated the same way the rest of it is: always visible for your own account,
+  otherwise only if that profile is public (`canViewFollowGraph`) — a private profile's social
+  graph stays private too, not just its tune list.
+
+**A public profile's tune lists aren't curated — it shows everything, automatically.** The first
+version had a "which of your tunes should show" picker (`knownTuneIds`, a hand-picked subset) on
+the Public Profile tab; per a direct follow-up request that was removed entirely — a public profile
+now just shows *every* tune in the owner's own lists, full stop, nothing to ask about. There are
+two such lists, both shown as their own section on the profile page (`app/u/[username]/page.tsx`):
+**Tunes** (the same list Jam Practice and the account's own "Tunes" tab use, `"tunes"` in
+`syncedSettings`) and **Tunes to Learn** — a new, separate personal list
+(`lib/useTunesToLearn.ts`/`lib/tunesToLearn.ts`, its own fixed `syncedSettings` key,
+`"jam-practice-tunes-to-learn"`) for tunes bookmarked from *other* people's profiles, kept
+deliberately apart from your own practice list rather than mixed into it. It rides the exact same
+generic `syncedSettings` table and the same `lib/syncedStore.ts` debounce/stale-closure-race fix as
+`useSyncedTunes`, but — like Favorites (`lib/useFavorites.ts`) — is **account-only**, with no
+signed-out local-storage fallback: the only way to ever add something to it is visiting another
+account's public profile, which already requires being signed in, so there's no meaningful
+signed-out story for it to fall back to. It gets its own **Tunes to Learn** tab in `/account`
+(`components/TunesToLearnTab.tsx`, between Tunes and Public Profile) — the exact same
+`TuneListManager` layout the Tunes tab uses (see that section below), just with standards-adding
+turned off, since there's nothing to browse here — everything on this list arrives by being copied
+from someone else's profile, not looked up.
+
+`convex/profiles.ts`'s `getPublicByUsername` is the one query in this app that reads across users'
+data *by design* — a public profile's tune lists have to come from the *owner's* `syncedSettings`
+rows, not the caller's, unlike every other synced-data query here (`convex/syncedSettings.ts`'s
+`get`, deliberately self-scoped via `getAuthUserId(ctx)`). Rather than loosen that existing query
+into a general "read anyone's data" backdoor, this reads the owner's `"tunes"` and
+`"jam-practice-tunes-to-learn"` rows directly and resolves each through `lib/profileTunes.ts`'s
+`resolvePublicTunes` — a pure function returning full `{id, name, tempos, keys, timeSignature}` for
+*every* tune in the blob (no id filter anymore — see above), but never `notes` (which could hold
+private practice notes). Also returns `null` — indistinguishable — for both "no such username" and
+"that profile exists but isn't public", so a visitor can't tell the two apart by probing usernames.
+
+**Viewing someone else's profile shows their tunes in the same styled list Jam Practice itself
+uses** (`components/PublicTuneList.tsx` — name, time signature, tempo/key chips, styled after
+`TunesTab.tsx`'s own rows), not the plain name pills the first version showed, per a direct
+follow-up request. The same component renders both the Tunes and Tunes to Learn sections — which
+list a tune came from doesn't change what a viewer can do with it. A signed-in viewer looking at
+someone *other* than themselves (`canAdd` on that component) gets two per-row actions, each copying
+that tune into one of the *viewer's own* lists as a fresh, independent tune (new ids throughout,
+`notes` always empty since a public profile never exposes it to copy in the first place): "Add"
+into their own Tunes, "Learn" into their own Tunes to Learn — each disabled once a tune with a
+matching name (`lib/standards.ts`'s `nameId`, the same name-insensitive match the jazz-standards
+picker already uses) is already in that target list. Copying is a snapshot, not a live reference —
+once it's in your list, it's yours to edit or delete independently of whatever the original owner
+does to theirs afterward, same reasoning as importing a CSV or adding a jazz standard.
+
+**File storage** (profile pictures): Convex's built-in `_storage` system table, no schema entry
+needed beyond referencing `v.id("_storage")`. The standard two-step upload flow — `profiles.ts`'s
+`generateAvatarUploadUrl` mutation returns a one-time URL, the browser `fetch()`s a POST straight
+to it (bypassing Convex's own request path entirely) with the image bytes, gets back
+`{storageId}`, and `setAvatar` attaches that id to the profile — deleting the previous
+`avatarStorageId`'s stored file first, if there was one, so changing your picture doesn't just
+leave the old upload orphaned in storage forever. The image itself is resized *client-side* before
+any of this — `components/AvatarUpload.tsx`'s `resizeToSquareJpeg`, a plain `<canvas>`
+center-crop-and-resize to 400×400 JPEG (no new dependency, same "reach for the platform first"
+habit as everywhere else audio-related in this app) — so a multi-megabyte phone photo never
+actually reaches the network as anything but a small round picture. `components/UserAvatar.tsx` is
+the one shared "picture, or a plain fallback icon" renderer reused everywhere an avatar shows up
+(the editor, a public profile, Community search results, Following/Followers lists).
+
+`/account` also has its own **Tunes** tab (`components/TunesTab.tsx`, between Profile and Public
+Profile in the sidebar) for managing the same tune list Jam Practice uses — same underlying
+`useSyncedTunes()`, so a tune added, edited, or deleted from either place is immediately visible in
+the other, no separate copy to keep in sync. It briefly reused `components/TunesPanel.tsx` (Jam
+Practice's own compact sidebar-panel UI) as-is, but per a direct follow-up request was rewritten as
+its own from-scratch layout instead, since the account page has room Jam Practice's narrow options
+column doesn't: Jam Practice spreads tune management across three separate surfaces (the inline
+collapsible list; a "search 631 jazz standards" modal reached via a `+`; a "search your tunes"
+bulk-select modal reached via a checklist icon) because each only has a cramped sidebar column to
+work in, but on the full-width account page there's no reason those need to be three different
+screens.
+
+The actual layout — search box, multi-select checkboxes, per-row edit/delete, and a bulk
+Select-all/Export/Import/Delete footer — lives in `components/TuneListManager.tsx`, a shared
+component both `TunesTab.tsx` and `TunesToLearnTab.tsx` wrap (per a direct follow-up request to put
+"this UI" on Tunes to Learn too, rather than duplicating it by hand into a second, drifting copy).
+It went through two designs: the first merged "search your tunes" and "browse jazz standards to
+add" into the *same* search box (typing a query showed matching standards inline, right below your
+own filtered results); per a direct follow-up request that was reverted, since searching your own
+tunes surfacing someone else's whole library in the same box read as confusing rather than
+convenient. The search box now only ever filters the list it's given — nothing else. Adding a jazz
+standard went back to being a separate, explicit action instead: `TuneListManager`'s `allowStandards`
+prop makes the header's `+` button open `StandardsPicker`, the exact same search-and-add-or-create-
+custom modal Jam Practice's own `TunesPanel` uses, styled as the exact same small round
+accent-colored icon button Jam Practice's own `+` is (per a direct request to match it, replacing an
+earlier rectangular "+ New tune" text button) — rather than jumping straight to a blank tune editor
+the way it does when `allowStandards` is off. **Both tabs turn this on**, including Tunes to Learn —
+per a direct follow-up request specifically asking for the Tunes tab's jazz-standards picker there
+too, once the first version had it off (reasoning at the time: nothing to browse, everything there
+arrives from someone else's profile) — there's a real use for it: bookmarking a standard you want to
+learn without first adding it to your actual practice list. `StandardsPicker` originally
+read/wrote `useSyncedTunes()` internally with no way to target a different list; it now takes
+`tunes`/`setTunes` as optional props instead, used only when passed — Jam Practice's own
+`TunesPanel.tsx` call site still passes neither, so it falls back to `useSyncedTunes()` exactly as
+before (verified unaffected: zero behavior change, confirmed via `git diff` showing no edit to that
+call site at all), while `TuneListManager` always passes its *own* `tunes`/`setTunes` through, so a
+standard picked from either tab's `+` lands in whichever list that tab is actually managing, never
+always Jam Practice's. **Jam Practice itself (`TunesPanel.tsx`'s own call site, `TunesManager.tsx`)
+was deliberately left untouched** throughout all of this — every request was specifically about the
+account-only experience, not about changing how Jam Practice's own sidebar panel works; the one
+shared file that *did* need a real edit, `StandardsPicker.tsx`, only gained optional props with a
+default that reproduces its exact original behavior. Deleting a tune from either tab needs no extra
+bookkeeping elsewhere — a public profile shows every tune live at read time (see above), so there's
+no separate "known tunes" selection anywhere that could reference a since-deleted id.
+
+**Account deletion now cascades here too** — a real gap found and fixed while building this:
+`convex/account.ts`'s `performDelete` previously only cleaned up Convex Auth's own tables
+(`authAccounts`/`authSessions`/`authRefreshTokens`/the `users` row), never touching
+`practiceSessions`/`syncedSettings` (a pre-existing gap, out of scope to fix here — see that
+section's own "genuinely untested" note — since that data is private, not public-facing) or,
+critically, this new `profiles`/`follows` data. Left as-is, "deleting your account" would have
+left a public profile — username, photo, everything — live and searchable forever, directly
+contradicting both the account page and the Privacy Policy's own "removes this visibility
+immediately" promise. Fixed: `performDelete` now also deletes the user's `profiles` row (and its
+uploaded avatar file via `ctx.storage.delete`, not just the database reference to it) and every
+`follows` row in both directions, so a deleted account doesn't leave a ghost entry in anyone
+else's Following/Followers list either.
+
+`app/privacy/page.tsx` gained a full "Public profiles" section (what a public profile exposes and
+to whom, that Following/Followers are visible under the same public/private rule, that avatars are
+resized client-side before upload) plus updates to "The short version", "Who else sees your data"
+(Convex now also named as storing file uploads, not just account data), and "Your choices"
+(turning a profile private/deleting it any time).
+
 ## Shared conventions — reuse these before writing something new
 
 - `components/LoadingSpinner.tsx`: the one shared "something's loading" indicator — a small row of
@@ -896,6 +1089,30 @@ Node scripts — but **none of it has been exercised in a live browser with real
 If Jack reports odd behavior in any of these, treat it as genuinely unverified, not a regression
 from something that used to work:
 
+- **Public profiles & follows** (see "Backend (Convex)" above for the full design): genuinely
+  nothing about this has been clicked through — this sandbox can't upload a real image file,
+  create two different signed-in sessions to test following/searching/viewing each other's
+  profiles, or click through a public profile link at all. Specifically unverified: the actual
+  avatar upload flow end to end (resize → `generateAvatarUploadUrl` → the raw `fetch()` POST →
+  `setAvatar`) in a real browser; whether the client-side `<canvas>` crop/resize produces a
+  reasonable-looking square from a real photo (portrait vs. landscape, unusual aspect ratios);
+  live username-availability checking while typing; the Community search page's actual results;
+  the Follow/Unfollow round-trip and both Following/Followers lists updating live; a public
+  profile page correctly showing (or correctly refusing to show) someone else's data depending on
+  their `isPublic` flag; and the account-deletion cascade fix (`performDelete` now also removing
+  the profile, its avatar file, and follow rows) actually leaving no trace behind in a real
+  deployment, not just type-checking. Also unverified, since this session's redesign: that a public
+  profile really does show *every* tune automatically with no picker involved; the "Add"/"Learn"
+  buttons on `PublicTuneList` actually copying a tune into the viewer's own Tunes/Tunes to Learn
+  lists correctly (fresh ids, no `notes` leakage, correctly disabling once already added); and the
+  account's own Tunes to Learn tab's edit/delete/clear-all against a list that was actually
+  populated by visiting someone else's profile first (as opposed to a script fabricating one).
+  Verified so far, purely at the logic level: `lib/username.ts` (valid/invalid formats, boundary
+  lengths) and `lib/profileTunes.ts`'s `resolvePublicTunes` (every tune returned in full,
+  `notes` never present, tolerant of malformed/missing input, individual bad entries dropped
+  without failing the whole list) against synthetic Node scripts, and that the whole feature —
+  schema, every new Convex function, every new page — type-checks and deploys cleanly to the dev
+  backend.
 - Recorder: multitrack recording/overdub, the auto-latency burst-tone alignment, "align to beat",
   moving clips between tracks, WAV export/mixdown.
 - Note Trainer listen mode: live pitch grading accuracy, the "ignore a held-over note" fix, the

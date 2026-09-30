@@ -5,8 +5,23 @@ import { useRouter } from "next/navigation";
 import { useAction, useQuery } from "convex/react";
 import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { api } from "@/convex/_generated/api";
+import FollowLists from "@/components/FollowLists";
 import LoadingSpinner from "@/components/LoadingSpinner";
-import { GoogleIcon, LogOutIcon, ShieldIcon, TrashIcon, UserIcon } from "@/components/tools";
+import PublicProfileEditor from "@/components/PublicProfileEditor";
+import SidebarNavButton from "@/components/SidebarNavButton";
+import TunesTab from "@/components/TunesTab";
+import TunesToLearnTab from "@/components/TunesToLearnTab";
+import {
+  BookIcon,
+  GlobeIcon,
+  GoogleIcon,
+  ListIcon,
+  LogOutIcon,
+  ShieldIcon,
+  TrashIcon,
+  UserIcon,
+  UsersIcon,
+} from "@/components/tools";
 
 /** `wide` widens the page to fit the Profile/Security/Danger zone sidebar layout (the signed-in
     view below); the loading and not-signed-in states stay at the original narrower width, since
@@ -23,43 +38,14 @@ function PageShell({ children, wide }: { children: ReactNode; wide?: boolean }) 
   );
 }
 
-type AccountView = "profile" | "security" | "danger";
-
-/** One row in the account page's own left sidebar — a plain button, not `next/link` (this isn't
-    page navigation, just which card shows in the content column), styled to match this app's
-    other active/inactive nav-item convention (`components/Sidebar.tsx`'s `NavItems`). */
-function AccountNavButton({
-  active,
-  icon: Icon,
-  label,
-  danger,
-  onClick,
-}: {
-  active?: boolean;
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  /** Styles the row for a destructive action (Danger zone) even when it's not the active view. */
-  danger?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? "page" : undefined}
-      className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
-        active
-          ? "bg-accent/10 text-accent"
-          : danger
-            ? "text-danger hover:bg-surface-hover"
-            : "text-muted hover:bg-surface-hover hover:text-foreground"
-      }`}
-    >
-      <Icon className="h-4 w-4 shrink-0" />
-      {label}
-    </button>
-  );
-}
+type AccountView =
+  | "profile"
+  | "tunes"
+  | "tunesToLearn"
+  | "publicProfile"
+  | "following"
+  | "security"
+  | "danger";
 
 /** Turns a thrown Error into UI text — Convex actions surface a real message (e.g. our own
     "Enter your password to confirm."), but a wrong password comes back as a long, internal-
@@ -630,19 +616,43 @@ export default function AccountPage() {
 
       <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-8">
         <nav className="flex w-full flex-col gap-1 rounded-2xl bg-surface p-2 sm:w-48 sm:shrink-0">
-          <AccountNavButton
+          <SidebarNavButton
             active={view === "profile"}
             icon={UserIcon}
             label="Profile"
             onClick={() => setView("profile")}
           />
-          <AccountNavButton
+          <SidebarNavButton
+            active={view === "tunes"}
+            icon={ListIcon}
+            label="Tunes"
+            onClick={() => setView("tunes")}
+          />
+          <SidebarNavButton
+            active={view === "tunesToLearn"}
+            icon={BookIcon}
+            label="Tunes to Learn"
+            onClick={() => setView("tunesToLearn")}
+          />
+          <SidebarNavButton
+            active={view === "publicProfile"}
+            icon={GlobeIcon}
+            label="Public Profile"
+            onClick={() => setView("publicProfile")}
+          />
+          <SidebarNavButton
+            active={view === "following"}
+            icon={UsersIcon}
+            label="Following"
+            onClick={() => setView("following")}
+          />
+          <SidebarNavButton
             active={view === "security"}
             icon={ShieldIcon}
             label="Security"
             onClick={() => setView("security")}
           />
-          <AccountNavButton
+          <SidebarNavButton
             active={view === "danger"}
             icon={TrashIcon}
             label="Danger zone"
@@ -650,7 +660,7 @@ export default function AccountPage() {
             onClick={() => setView("danger")}
           />
           <div className="my-1 border-t border-background" />
-          <AccountNavButton icon={LogOutIcon} label="Sign out" onClick={handleSignOut} />
+          <SidebarNavButton icon={LogOutIcon} label="Sign out" onClick={handleSignOut} />
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
@@ -687,6 +697,14 @@ export default function AccountPage() {
               </div>
             </section>
           )}
+
+          {view === "tunes" && <TunesTab />}
+
+          {view === "tunesToLearn" && <TunesToLearnTab />}
+
+          {view === "publicProfile" && <PublicProfileEditor />}
+
+          {view === "following" && <FollowLists />}
 
           {view === "security" && (
             <>

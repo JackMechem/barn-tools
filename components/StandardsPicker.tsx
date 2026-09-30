@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon, PlusIcon, SearchIcon } from "@/components/tools";
 import { STANDARDS, Standard, nameId, searchStandards, standardToTune } from "@/lib/standards";
+import { Tune } from "@/lib/types";
 import { useSyncedTunes } from "@/lib/useSyncedTunes";
 
 const MAX_ROWS = 60;
@@ -10,11 +11,23 @@ const MAX_ROWS = 60;
 export default function StandardsPicker({
   onClose,
   onCreateCustom,
+  tunes: tunesOverride,
+  setTunes: setTunesOverride,
 }: {
   onClose: () => void;
   onCreateCustom: (name: string) => void;
+  /** Which list a picked standard is added into. Omitted by Jam Practice's own `TunesPanel.tsx`
+      (this component's original, still-unchanged caller), which falls back to `useSyncedTunes()`
+      below — Jam Practice's own tune list, exactly as before this prop existed. Passed explicitly
+      by `TuneListManager.tsx` so the same search-standards modal can add into whichever list *it*
+      is currently managing on the account page (the Tunes tab, or the separate Tunes to Learn tab)
+      instead of always Jam Practice's own list. */
+  tunes?: Tune[];
+  setTunes?: (update: Tune[] | ((prev: Tune[]) => Tune[])) => void;
 }) {
-  const [tunes, setTunes] = useSyncedTunes();
+  const [ownTunes, setOwnTunes] = useSyncedTunes();
+  const tunes = tunesOverride ?? ownTunes;
+  const setTunes = setTunesOverride ?? setOwnTunes;
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);

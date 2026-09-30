@@ -33,9 +33,14 @@ export default function TunesPanel({
 }: {
   onDeleteTune: (id: string) => void;
   onClearAll: () => void;
-  /** Whether random picks come from the whole standards library instead of this list. */
-  pickFromStandards: boolean;
-  onPickFromStandardsChange: (value: boolean) => void;
+  /** Whether random picks come from the whole standards library instead of this list — a
+      Jam-Practice-specific concept. Omit both this and `onPickFromStandardsChange` (as the
+      Public Profile editor does — see `components/PublicProfileEditor.tsx` — tune management is
+      the same everywhere, but "pick from standards" is only meaningful for Jam Practice's own
+      random-tune-picker) to hide that row entirely rather than showing a toggle that wouldn't do
+      anything where it's reused. */
+  pickFromStandards?: boolean;
+  onPickFromStandardsChange?: (value: boolean) => void;
 }) {
   const [tunes, setTunes] = useSyncedTunes();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -118,12 +123,14 @@ export default function TunesPanel({
           </>
         }
       >
-        <SwitchRow
-          label="Pick from all jazz standards"
-          checked={pickFromStandards}
-          onChange={onPickFromStandardsChange}
-          hint="Draws from the ~630 built-in jazz standards instead of your own tune list below."
-        />
+        {onPickFromStandardsChange && (
+          <SwitchRow
+            label="Pick from all jazz standards"
+            checked={pickFromStandards ?? false}
+            onChange={onPickFromStandardsChange}
+            hint="Draws from the ~630 built-in jazz standards instead of your own tune list below."
+          />
+        )}
 
         {tunes.length === 0 ? (
           <p className="text-sm text-muted">

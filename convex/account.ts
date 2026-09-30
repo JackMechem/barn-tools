@@ -206,6 +206,32 @@ export const performDelete = internalMutation({
       await ctx.db.delete(session._id);
     }
 
+    // Public-facing data specifically must not outlive the account it belongs to — unlike the
+    // private synced tool data (tunes, trainer stats, ...) this doesn't touch, a public profile
+    // staying live and searchable after "deleting your account" would directly contradict what
+    // the account page and Privacy Policy both promise. Deletes the profile row itself, its
+    // uploaded avatar file (if any — otherwise it'd just sit in storage forever, unreferenced),
+    // and every follow relationship in both directions (so nobody's Following/Followers list
+    // keeps showing a ghost entry for a user that no longer exists).
+    const profile = await ctx.db
+      .query("profiles")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .unique();
+    if (profile) {
+      if (profile.avatarStorageId) await ctx.storage.delete(profile.avatarStorageId);
+      await ctx.db.delete(profile._id);
+    }
+    const following = await ctx.db
+      .query("follows")
+      .withIndex("by_follower", (q) => q.eq("followerId", userId))
+      .collect();
+    for (const row of following) await ctx.db.delete(row._id);
+    const followers = await ctx.db
+      .query("follows")
+      .withIndex("by_following", (q) => q.eq("followingId", userId))
+      .collect();
+    for (const row of followers) await ctx.db.delete(row._id);
+
     await ctx.db.delete(userId);
   },
 });

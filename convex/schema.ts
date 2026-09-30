@@ -67,4 +67,47 @@ export default defineSchema({
     value: v.string(),
     updatedAt: v.number(),
   }).index("by_user_key", ["userId", "key"]),
+
+  /** A user's public-facing profile — this app's first data that's ever visible to anyone other
+      than its own owner. `username` is always lowercased before storing (one field, no separate
+      display-case, so "@JohnSmith" and "@johnsmith" can't read as two different things) and has
+      nothing to do with how you sign in — a separate identity you opt into. `instruments` is
+      deliberately free text, not `lib/instruments.ts`'s `INSTRUMENTS` catalog (that list is
+      range-specific for the note trainers — six different "Keyboard — N Key" entries, nothing for
+      Drums/Voice — a bad semantic fit for "what do you play"; see `lib/profileInstruments.ts`'s
+      `COMMON_INSTRUMENTS` for the autocomplete-only suggestion list). A public profile's tune
+      lists (`convex/profiles.ts`'s `getPublicByUsername`) aren't stored here at all — they're
+      *every* tune in the owner's own `"tunes"`/`"tunesToLearn"` `syncedSettings` rows, resolved
+      live at read time, not a curated subset; see that function's own comment for why there's
+      nothing to pick here. None of this is visible to anyone while `isPublic` is false — see
+      `convex/profiles.ts` for exactly which queries require that flag.
+      `knownTuneIds` is a deprecated, no-longer-written leftover from an earlier design (a curated
+      subset of tunes to show, picked by hand) — kept `optional` rather than removed so existing
+      rows that still have it don't fail schema validation; new code never reads or writes it. */
+  profiles: defineTable({
+    userId: v.id("users"),
+    username: v.string(),
+    avatarStorageId: v.optional(v.id("_storage")),
+    instruments: v.array(v.string()),
+    knownTuneIds: v.optional(v.array(v.string())),
+    isPublic: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_username", ["username"]),
+
+  /** One row per follow relationship — `followerId` follows `followingId`. `by_pair` is what
+      `convex/follows.ts`'s `follow` mutation checks first to stay idempotent (never inserts a
+      second row for the same pair). Both Following and Followers show on a profile
+      (`by_follower`/`by_following` respectively), gated the same way the rest of a profile is:
+      always visible for your own account, otherwise only if that profile is `isPublic` — a
+      private profile's social graph stays private too, not just its tune list. */
+  follows: defineTable({
+    followerId: v.id("users"),
+    followingId: v.id("users"),
+    createdAt: v.number(),
+  })
+    .index("by_follower", ["followerId"])
+    .index("by_following", ["followingId"])
+    .index("by_pair", ["followerId", "followingId"]),
 });

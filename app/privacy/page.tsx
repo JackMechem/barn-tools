@@ -22,8 +22,11 @@ export default function PrivacyPage() {
           data (tune lists, settings, chord charts, practice history and stats) works the same way
           when you&apos;re signed out — but if you create an account, that data syncs to
           jackshed&apos;s servers instead, so it follows you to another device signed into the same
-          account. Signing in is entirely optional; every tool works fully without one. There are
-          no ads, no analytics, and no trackers anywhere on this site.
+          account. Signing in is entirely optional; every tool works fully without one. There&apos;s
+          also an entirely separate, opt-in public profile (a username, picture, instruments, and
+          your tunes) that only becomes visible to anyone — including people without an account —
+          if you explicitly turn it on; see &quot;Public profiles&quot; below. There are no ads, no
+          analytics, and no trackers anywhere on this site.
         </p>
       </LegalSection>
 
@@ -83,6 +86,47 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
+      <LegalSection title="Public profiles">
+        <p>
+          Separate from the account data above, jackshed lets you optionally set up a public
+          profile — a username (unrelated to how you sign in), a picture, and the instruments you
+          play — from the Public Profile tab of the account page. None of this is visible to
+          anyone else, and it doesn&apos;t appear in the Community search page, until you
+          explicitly turn &quot;Make profile public&quot; on there.
+        </p>
+        <p>
+          Once public, your username, picture, instruments, and <strong>every tune</strong> in
+          your Tunes and Tunes to Learn lists (name, tempos, keys, and time signature — never any
+          notes you&apos;ve written on a tune) can be viewed by anyone at its own page
+          (jackshed.com/u/your-username) and found via the Community search page — both reachable
+          without an account. There&apos;s no way to show only some of your tunes; making your
+          profile public shows all of them. A public profile also shows who you follow and who
+          follows you (see &quot;Follows&quot; below) to anyone who can view the profile at all,
+          under that same rule. Turning a profile back to private, or deleting it entirely, removes
+          this visibility immediately — the account page lets you do either any time.
+        </p>
+        <p>
+          <strong>Tunes to Learn.</strong> Separate from your own Jam Practice tune list, jackshed
+          also lets you keep a personal &quot;Tunes to Learn&quot; list — built by copying tunes
+          you see on other people&apos;s public profiles onto your own list, from the account
+          page&apos;s Tunes to Learn tab. This list is stored on jackshed&apos;s servers the same
+          way your other synced tool data is, and is shown on your own public profile under the
+          same public/private rule as everything else described here.
+        </p>
+        <p>
+          <strong>Follows.</strong> If you follow another public profile, that&apos;s stored as a
+          simple record of who follows whom. Your own Following and Followers lists are always
+          visible to you on the account page; on a public profile, both lists are visible to
+          anyone who can view that profile, the same as the rest of it. Following requires being
+          signed in; there&apos;s no notification sent to the account you follow.
+        </p>
+        <p>
+          Profile pictures are uploaded files, stored via Convex&apos;s file storage (see
+          &quot;Who else sees your data&quot; below) — resized in your own browser before
+          uploading, so only the resized version ever reaches jackshed&apos;s servers.
+        </p>
+      </LegalSection>
+
       <LegalSection title="Cookies and browser storage">
         <p>
           jackshed doesn&apos;t use advertising or tracking cookies. Browser storage is used only
@@ -100,8 +144,9 @@ export default function PrivacyPage() {
         <ul className="list-disc space-y-1 pl-5">
           <li>
             <LegalLink href="https://www.convex.dev/legal/privacy">Convex</LegalLink> — stores
-            account data (email, hashed password, session tokens) and runs the server-side code
-            that handles signing in and out.
+            account data (email, hashed password, session tokens), synced tool data, and (if you
+            set one) your public profile — including uploaded profile pictures, via Convex&apos;s
+            file storage — and runs the server-side code that handles all of it.
           </li>
           <li>
             <LegalLink href="https://resend.com/legal/privacy-policy">Resend</LegalLink> — sends
@@ -153,6 +198,10 @@ export default function PrivacyPage() {
             View, change, or delete your account yourself, any time, from the account page —
             change or set a password, connect or disconnect Google sign-in, or permanently delete
             the account and everything tied to it.
+          </li>
+          <li>
+            Turn a public profile back to private, or remove it entirely, any time from the Public
+            Profile tab — either immediately stops anyone from being able to view it.
           </li>
           <li>
             Clear your browser&apos;s local storage for jackshed.com at any time to remove
