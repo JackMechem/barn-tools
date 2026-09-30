@@ -72,6 +72,13 @@ export default function Home() {
         >
           Terms
         </Link>
+        <span aria-hidden>·</span>
+        <Link
+          href="/credits"
+          className="font-medium text-accent underline-offset-4 outline-none hover:underline focus-visible:underline"
+        >
+          Credits
+        </Link>
       </footer>
     </div>
   );

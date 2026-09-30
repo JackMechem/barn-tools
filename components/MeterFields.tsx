@@ -61,6 +61,7 @@ export function StepButton({
  */
 export function SteppedField({
   label,
+  showLabel = true,
   value,
   min,
   max,
@@ -70,6 +71,9 @@ export function SteppedField({
   onChange,
 }: {
   label: string;
+  /** The visible title above the control — off leaves just the +/number/− control itself, still
+      using `label` for the individual buttons'/field's own accessible names (via aria-label). */
+  showLabel?: boolean;
   value: number;
   min: number;
   max: number;
@@ -113,7 +117,7 @@ export function SteppedField({
 
   return (
     <div className="flex flex-col items-center gap-1.5 text-sm">
-      <span className="font-medium text-muted">{label}</span>
+      {showLabel && <span className="font-medium text-muted">{label}</span>}
       {layout === "row" ? (
         <div className="flex items-center gap-2">
           {decrease}
@@ -138,10 +142,18 @@ export function SteppedField({
  */
 export function BeatUnitField({
   value,
+  showLabel = true,
+  layout = "stack",
   hint,
   onChange,
 }: {
   value: number;
+  /** Same meaning as `SteppedField`'s own `showLabel` — off hides just the visible "Beat unit"
+      title, the field itself keeps its aria-label regardless. */
+  showLabel?: boolean;
+  /** Mirrors `SteppedField`'s own layout option: `"stack"` (default) puts +/− above and below
+      the number; `"row"` puts them on either side of it instead. */
+  layout?: "stack" | "row";
   hint?: string;
   onChange: (value: number) => void;
 }) {
@@ -162,47 +174,67 @@ export function BeatUnitField({
     setDraft(null);
   }
 
+  const increase = (
+    <button
+      type="button"
+      aria-label="Larger beat unit"
+      onClick={() => step(1)}
+      disabled={index >= NOTE_VALUES.length - 1}
+      className={CIRCLE_BUTTON}
+    >
+      +
+    </button>
+  );
+  const decrease = (
+    <button
+      type="button"
+      aria-label="Smaller beat unit"
+      onClick={() => step(-1)}
+      disabled={index <= 0}
+      className={CIRCLE_BUTTON}
+    >
+      −
+    </button>
+  );
+  const field = (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={shown}
+      aria-label="Beat unit"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        else if (e.key === "Escape") setDraft(null);
+        else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          step(1);
+        } else if (e.key === "ArrowDown") {
+          e.preventDefault();
+          step(-1);
+        }
+      }}
+      className={CIRCLE_INPUT}
+    />
+  );
+
   return (
     <div className="flex flex-col items-center gap-1.5 text-sm">
-      <span className="font-medium text-muted">Beat unit</span>
-      <button
-        type="button"
-        aria-label="Larger beat unit"
-        onClick={() => step(1)}
-        disabled={index >= NOTE_VALUES.length - 1}
-        className={CIRCLE_BUTTON}
-      >
-        +
-      </button>
-      <input
-        type="text"
-        inputMode="numeric"
-        value={shown}
-        aria-label="Beat unit"
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={(e) => commit(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-          else if (e.key === "Escape") setDraft(null);
-          else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            step(1);
-          } else if (e.key === "ArrowDown") {
-            e.preventDefault();
-            step(-1);
-          }
-        }}
-        className={CIRCLE_INPUT}
-      />
-      <button
-        type="button"
-        aria-label="Smaller beat unit"
-        onClick={() => step(-1)}
-        disabled={index <= 0}
-        className={CIRCLE_BUTTON}
-      >
-        −
-      </button>
+      {showLabel && <span className="font-medium text-muted">Beat unit</span>}
+      {layout === "row" ? (
+        <div className="flex items-center gap-2">
+          {decrease}
+          {field}
+          {increase}
+        </div>
+      ) : (
+        <>
+          {increase}
+          {field}
+          {decrease}
+        </>
+      )}
       {hint && <Hint>{hint}</Hint>}
     </div>
   );
@@ -443,17 +475,22 @@ export function MeterOptions({
         ))}
       </div>
 
-      <div className="grid grid-cols-2 items-start gap-4">
+      <div className="flex flex-col gap-3">
         <SteppedField
           label="Beats per bar"
+          showLabel={false}
           value={beatsPerBar}
           min={1}
           max={MAX_BEATS}
+          layout="row"
           onChange={onChangeBeats}
           hint="How many beats make up one bar."
         />
+        <div className="border-t border-surface-hover" />
         <BeatUnitField
           value={beatUnit}
+          showLabel={false}
+          layout="row"
           onChange={onSetBeatUnit}
           hint="Which note value counts as one beat, e.g. 4 for quarter notes, 8 for eighths."
         />

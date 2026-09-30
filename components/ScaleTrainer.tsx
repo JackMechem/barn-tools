@@ -49,7 +49,7 @@ import {
   randomScaleRound,
   scaleRoundForPitchClass,
 } from "@/lib/scales";
-import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 import { DEFAULT_TONE_ID, TONES, playNote } from "@/lib/tones";
 import {
@@ -179,7 +179,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function ScaleTrainer() {
-  const [settings, updateSettings] = usePersistedSettings(
+  const [settings, updateSettings] = useSyncedSettings(
     SETTINGS_KEY,
     DEFAULT_SETTINGS,
   );

@@ -2,11 +2,6 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-// Phase 1 (accounts only): the auth system's own tables (users, authAccounts, authSessions, ...)
-// plus one app-specific table for email-gated confirmations (delete account, change/set
-// password). The synced-data tables (tunes, chordCharts, trainerStats, trainerHistory) get added
-// one at a time in their own phases, alongside the queries/mutations and UI that actually use
-// them — see PROJECT.md and the plan this was built from.
 export default defineSchema({
   ...authTables,
 
@@ -20,4 +15,56 @@ export default defineSchema({
     codeHash: v.string(),
     expiresAt: v.number(),
   }).index("by_user_kind", ["userId", "kind"]),
+
+  /** One saved Practice Timer session per row (mirrors `lib/practiceTimer.ts`'s `PracticeSession`
+      union, minus its own `id` — the Convex document id is the id once synced). Signed-in-only:
+      when signed out, the exact same shape lives client-side in localStorage instead
+      (`lib/practiceSessionsStore.ts`) — see `lib/usePracticeSessions.ts`, which switches between
+      the two with no merge, per Jack's call: signing in reads the account's data only, local data
+      already on the device is simply not consulted. */
+  practiceSessions: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    type: v.union(v.literal("custom"), v.literal("pomodoro")),
+    segments: v.optional(
+      v.array(v.object({ id: v.string(), title: v.string(), minutes: v.number() })),
+    ),
+    pomodoro: v.optional(
+      v.object({
+        workMinutes: v.number(),
+        shortBreakMinutes: v.number(),
+        longBreakMinutes: v.number(),
+        workTitles: v.array(v.string()),
+        cyclesBeforeLongBreak: v.number(),
+        totalCycles: v.union(v.number(), v.null()),
+      }),
+    ),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  /** Generic account-wide sync for every other tool's settings — one row per `(userId, key)`,
+      `value` holding that tool's *entire* localStorage-equivalent settings object, JSON-stringified
+      whole. Deliberately not a hand-typed table per tool: nearly every tool component already
+      round-trips its own settings object through `JSON.stringify`/`JSON.parse` for
+      `usePersistedSettings` (`lib/usePersistedSettings.ts`), so it's already guaranteed
+      JSON-safe — storing it as one opaque blob here means a new tool, or a new field on an
+      existing tool's settings, never needs a matching schema change on this side. `key` is each
+      tool's own existing localStorage key string, reused as-is (e.g.
+      `"jam-practice-note-trainer"`, `"jam-practice-metronome"`), so there's exactly one obvious
+      `key` per synced call site, not a second naming scheme to keep in sync alongside it.
+      `lib/useSyncedSettings.ts` is the one hook every synced tool's settings go through — same
+      no-merge rule as
+      `practiceSessions` above: signed out reads/writes localStorage only (unchanged,
+      zero-risk — it's still the exact same `usePersistedSettings` code underneath), signed in
+      reads/writes this table only, and whatever's already in localStorage on that device is
+      simply never consulted once signed in. Reused as-is (same table, no schema change) for
+      `lib/useSyncedTunes.ts` (Jam Practice's tune list — not itself a `usePersistedSettings`
+      object, but the exact same "one JSON blob per key" shape fits it too) under the fixed key
+      `"tunes"`. */
+  syncedSettings: defineTable({
+    userId: v.id("users"),
+    key: v.string(),
+    value: v.string(),
+    updatedAt: v.number(),
+  }).index("by_user_key", ["userId", "key"]),
 });

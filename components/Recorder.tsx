@@ -49,7 +49,7 @@ import {
   saveTrackBlob,
 } from "@/lib/projectStore";
 import { makeId } from "@/lib/types";
-import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 import { PATTERN_SECONDS, findSyncBurst, scheduleSyncBursts } from "@/lib/syncBurst";
 import { downloadBlob, encodeWav, safeFilename } from "@/lib/wav";
@@ -571,7 +571,7 @@ function readInputLevel(analyser: AnalyserNode | null): number {
 }
 
 export default function Recorder() {
-  const [settings, updateSettings] = usePersistedSettings(SETTINGS_KEY, DEFAULT_SETTINGS);
+  const [settings, updateSettings] = useSyncedSettings(SETTINGS_KEY, DEFAULT_SETTINGS);
   const { inputDeviceId: savedDevice, volume, metronomeOn, bpm, beatsPerBar } = settings;
   const { countInBars, clickVolume, overdub, showGrid, learnedShiftMs } = settings;
   const trackHeight = Math.min(MAX_TRACK_HEIGHT, Math.max(MIN_TRACK_HEIGHT, settings.trackHeight));

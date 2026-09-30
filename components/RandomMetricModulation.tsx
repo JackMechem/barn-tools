@@ -33,7 +33,7 @@ import {
   useTapTempo,
 } from "@/lib/meterControls";
 import { MODULATIONS, Phase, planModulation } from "@/lib/metricModulation";
-import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 
 const DEFAULT_BPM = 100;
@@ -74,7 +74,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function RandomMetricModulation() {
-  const [settings, updateSettings] = usePersistedSettings(
+  const [settings, updateSettings] = useSyncedSettings(
     SETTINGS_KEY,
     DEFAULT_SETTINGS,
   );
@@ -132,8 +132,15 @@ export default function RandomMetricModulation() {
     updateSettings({ avoidRepeat });
   const setReturnToOriginal = (returnToOriginal: boolean) =>
     updateSettings({ returnToOriginal });
+  // Turning the previous-tempo click on also forces "Play until tempos realign" on — that's what
+  // guarantees the reference click's predicted realignment (see the comment further down, near
+  // where that's computed) actually stays true rather than drifting out of sync with the main
+  // click, so the two toggles aren't independently choosable while this one's on. Turning it back
+  // off just lifts that restriction — matchToRealignment stays however it was left, not reset.
   const setPlayOriginalTempo = (playOriginalTempo: boolean) =>
-    updateSettings({ playOriginalTempo });
+    updateSettings(
+      playOriginalTempo ? { playOriginalTempo, matchToRealignment: true } : { playOriginalTempo },
+    );
   const setReferenceMuted = (referenceMuted: boolean) =>
     updateSettings({ referenceMuted });
   const setReferenceSoundId = (referenceSoundId: string) =>
@@ -484,8 +491,12 @@ export default function RandomMetricModulation() {
               label="Play until tempos realign"
               checked={matchToRealignment}
               onChange={setMatchToRealignment}
-              disabled={running}
-              hint="Extends each interval to however many bars it takes the new tempo to land back on a downbeat with the reference tempo."
+              disabled={running || playOriginalTempo}
+              hint={
+                playOriginalTempo
+                  ? "Extends each interval to however many bars it takes the new tempo to land back on a downbeat with the reference tempo. Required — and locked on — while the previous tempo click is on, so the two stay in sync; turn that off first to change this."
+                  : "Extends each interval to however many bars it takes the new tempo to land back on a downbeat with the reference tempo."
+              }
             />
 
             <SwitchRow
@@ -541,7 +552,7 @@ export default function RandomMetricModulation() {
 
           <CollapsiblePanel
             id="reference"
-            title="Original tempo click"
+            title="Previous tempo click"
             icon={SpeakerIcon}
             toggle={{
               checked: playOriginalTempo,

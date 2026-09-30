@@ -17,25 +17,31 @@ export default function PrivacyPage() {
 
       <LegalSection title="The short version">
         <p>
-          Almost everything you do in jackshed — your tune lists, chord charts, recordings, and
-          practice stats — stays in your own browser and is never sent anywhere. Creating an
-          account is optional, and only adds an email address, a securely hashed password (or
-          basic profile info from Google, if you use that instead), and — coming in a later
-          update, not yet — the option to sync your practice data across your own devices. There
-          are no ads, no analytics, and no trackers anywhere on this site.
+          Recorder and Slow Downer&apos;s actual recordings and loaded audio files always stay in
+          your own browser and are never sent anywhere, account or not. Every other tool&apos;s
+          data (tune lists, settings, chord charts, practice history and stats) works the same way
+          when you&apos;re signed out — but if you create an account, that data syncs to
+          jackshed&apos;s servers instead, so it follows you to another device signed into the same
+          account. Signing in is entirely optional; every tool works fully without one. There are
+          no ads, no analytics, and no trackers anywhere on this site.
         </p>
       </LegalSection>
 
       <LegalSection title="Data that stays on your device">
         <p>
-          Every tool on jackshed — the trainers, the metronome, Chord Charts, Slow Downer, the
-          Recorder — stores its data (settings, tune lists, imported chord charts, practice
-          history, recordings, and any audio files you load) directly in your browser&apos;s own
-          local storage, using standard browser technology (localStorage and IndexedDB). None of
-          it is uploaded to jackshed&apos;s servers or seen by Jack Mechem. It stays on your device
-          until you clear it yourself (through your browser&apos;s own settings, or a tool&apos;s
-          own reset controls where available) — clearing your browser&apos;s site data for
-          jackshed.com will delete it.
+          Signed out, every tool on jackshed — the trainers, the metronome, Chord Charts, Slow
+          Downer, the Recorder — stores its data (settings, tune lists, imported chord charts,
+          practice history, recordings, and any audio files you load) directly in your
+          browser&apos;s own local storage, using standard browser technology (localStorage and
+          IndexedDB). None of it is uploaded to jackshed&apos;s servers or seen by Jack Mechem. It
+          stays on your device until you clear it yourself (through your browser&apos;s own
+          settings, or a tool&apos;s own reset controls where available) — clearing your
+          browser&apos;s site data for jackshed.com will delete it.
+        </p>
+        <p>
+          Recorder&apos;s and Slow Downer&apos;s actual audio (recordings and loaded files) always
+          works this way, signed in or not — see &quot;Data collected if you create an
+          account&quot; below for what does sync.
         </p>
       </LegalSection>
 
@@ -65,9 +71,15 @@ export default function PrivacyPage() {
           which expires automatically after 15 minutes whether or not it&apos;s used.
         </p>
         <p>
-          As of this writing, that&apos;s the extent of it — signing in doesn&apos;t yet sync any
-          of your actual practice data (tune lists, recordings, stats) to jackshed&apos;s servers.
-          That&apos;s planned for a future update; this page will be updated first when it ships.
+          If you&apos;re signed in, jackshed also stores your tool data on its servers instead of
+          only in your browser — tune lists, each tool&apos;s settings, imported chord charts, and
+          the trainers&apos; practice history/stats. Signing in doesn&apos;t merge what was already
+          in your browser with your account — it switches over to whatever&apos;s already saved to
+          the account, so anything only saved locally before you signed in stays only in that
+          browser&apos;s local storage unless you re-add it while signed in. Recorder&apos;s
+          recordings and Slow Downer&apos;s loaded audio files are the one exception — those stay
+          local-only regardless of sign-in state (see &quot;Data that stays on your device&quot;
+          above).
         </p>
       </LegalSection>
 
@@ -106,6 +118,16 @@ export default function PrivacyPage() {
             and serves the jackshed.com site itself, and so processes standard technical
             information (like IP addresses) as part of serving web pages, the same as any web
             host.
+          </li>
+          <li>
+            <LegalLink href="https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement">
+              GitHub Pages
+            </LegalLink>{" "}
+            — the Piano and Rhodes tones (used across several tools — see{" "}
+            <LegalLink href="/credits">Credits</LegalLink>) are real recordings your browser
+            fetches directly from two GitHub Pages-hosted sample libraries the first time you pick
+            one of those tones, not through jackshed&apos;s own servers, so GitHub sees that
+            request the same way it would for any page it hosts.
           </li>
         </ul>
         <p>
@@ -157,9 +179,8 @@ export default function PrivacyPage() {
 
       <LegalSection title="Changes to this policy">
         <p>
-          If this policy changes — most likely when practice-data syncing is added — this page
-          will be updated and the date at the top will change. There&apos;s no mailing list or
-          other notification beyond that.
+          If this policy changes, this page will be updated and the date at the top will change.
+          There&apos;s no mailing list or other notification beyond that.
         </p>
       </LegalSection>
 

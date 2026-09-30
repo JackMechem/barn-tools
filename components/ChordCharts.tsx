@@ -20,6 +20,7 @@ import {
   type IRealSong,
 } from "@/lib/iRealPro";
 import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSyncedSettings } from "@/lib/useSyncedSettings";
 
 type StoredSong = IRealSong & { id: string };
 
@@ -36,10 +37,12 @@ function songKey(song: IRealSong) {
 }
 
 export default function ChordCharts() {
-  const [{ songs }, updateLibrary] = usePersistedSettings(
-    LIBRARY_KEY,
-    LIBRARY_DEFAULTS,
-  );
+  // Imported songs are this tool's real data, so they sync to the account when signed in
+  // (useSyncedSettings). barsPerRow/selectedId are a device-local display preference, not
+  // meaningfully "saved data" to follow across devices, so they stay on plain usePersistedSettings
+  // — unaffected by sign-in state, matching the same cosmetic-vs-data split this file already
+  // drew between these two keys before sync existed at all.
+  const [{ songs }, updateLibrary] = useSyncedSettings(LIBRARY_KEY, LIBRARY_DEFAULTS);
   const [{ selectedId, barsPerRow }, updateView] = usePersistedSettings(
     VIEW_KEY,
     VIEW_DEFAULTS,

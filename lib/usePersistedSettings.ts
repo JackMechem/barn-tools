@@ -16,22 +16,30 @@ function getStore<T>(key: string): Store<T> {
   return store as Store<T>;
 }
 
+/** Keep only fields of `parsed` whose type matches `defaults`, so bad/stale/foreign data can't
+    break the UI — shared by the localStorage path below and `lib/useSyncedSettings.ts`'s
+    Convex-backed path, so a value read from an account gets exactly the same defensive treatment
+    as one read from this device's own localStorage (same reasoning as "an old saved session
+    missing a newer field still shows something sane" elsewhere in this codebase). */
+export function mergeWithDefaults<T extends object>(parsed: unknown, defaults: T): T {
+  if (!parsed || typeof parsed !== "object") return defaults;
+  const merged = { ...defaults } as Record<string, unknown>;
+  for (const [field, fallback] of Object.entries(defaults)) {
+    const stored = (parsed as Record<string, unknown>)[field];
+    const sameType = Array.isArray(fallback)
+      ? Array.isArray(stored)
+      : typeof stored === typeof fallback;
+    if (stored !== undefined && sameType) merged[field] = stored;
+  }
+  return merged as T;
+}
+
 /** Keep only stored fields whose type matches the default, so bad data can't break the UI. */
 function read<T extends object>(key: string, defaults: T): T {
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return defaults;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return defaults;
-    const merged = { ...defaults } as Record<string, unknown>;
-    for (const [field, fallback] of Object.entries(defaults)) {
-      const stored = parsed[field];
-      const sameType = Array.isArray(fallback)
-        ? Array.isArray(stored)
-        : typeof stored === typeof fallback;
-      if (stored !== undefined && sameType) merged[field] = stored;
-    }
-    return merged as T;
+    return mergeWithDefaults(JSON.parse(raw), defaults);
   } catch {
     return defaults;
   }

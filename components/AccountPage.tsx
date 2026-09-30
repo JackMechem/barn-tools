@@ -5,13 +5,58 @@ import { useRouter } from "next/navigation";
 import { useAction, useQuery } from "convex/react";
 import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { api } from "@/convex/_generated/api";
-import { GoogleIcon } from "@/components/tools";
+import { GoogleIcon, LogOutIcon, ShieldIcon, TrashIcon, UserIcon } from "@/components/tools";
 
-function PageShell({ children }: { children: ReactNode }) {
+/** `wide` widens the page to fit the Profile/Security/Danger zone sidebar layout (the signed-in
+    view below); the loading and not-signed-in states stay at the original narrower width, since
+    neither has anything to put a sidebar next to. */
+function PageShell({ children, wide }: { children: ReactNode; wide?: boolean }) {
   return (
-    <main className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 pb-16 pt-[calc(env(safe-area-inset-top)+4.5rem)] sm:px-6 lg:pt-16">
+    <main
+      className={`mx-auto flex w-full flex-col gap-6 px-4 pb-16 pt-[calc(env(safe-area-inset-top)+4.5rem)] sm:px-6 lg:pt-16 ${
+        wide ? "max-w-3xl" : "max-w-md"
+      }`}
+    >
       {children}
     </main>
+  );
+}
+
+type AccountView = "profile" | "security" | "danger";
+
+/** One row in the account page's own left sidebar — a plain button, not `next/link` (this isn't
+    page navigation, just which card shows in the content column), styled to match this app's
+    other active/inactive nav-item convention (`components/Sidebar.tsx`'s `NavItems`). */
+function AccountNavButton({
+  active,
+  icon: Icon,
+  label,
+  danger,
+  onClick,
+}: {
+  active?: boolean;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  /** Styles the row for a destructive action (Danger zone) even when it's not the active view. */
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+        active
+          ? "bg-accent/10 text-accent"
+          : danger
+            ? "text-danger hover:bg-surface-hover"
+            : "text-muted hover:bg-surface-hover hover:text-foreground"
+      }`}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {label}
+    </button>
   );
 }
 
@@ -544,6 +589,7 @@ export default function AccountPage() {
   const { signOut } = useAuthActions();
   const router = useRouter();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [view, setView] = useState<AccountView>("profile");
 
   if (isLoading) {
     return (
@@ -569,51 +615,108 @@ export default function AccountPage() {
   const hasPassword = providers?.includes("password") ?? false;
   const hasGoogle = providers?.includes("google") ?? false;
 
+  function handleSignOut() {
+    void signOut();
+    router.push("/");
+  }
+
   return (
-    <PageShell>
+    <PageShell wide>
       <div className="flex flex-col gap-1 text-left">
         <h1 className="text-2xl font-bold text-accent">Account</h1>
         <p className="text-sm text-muted">{user?.email ?? user?.name ?? "Signed in"}</p>
       </div>
 
-      <PasswordSection hasPassword={hasPassword} email={user?.email ?? null} />
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-8">
+        <nav className="flex w-full flex-col gap-1 rounded-2xl bg-surface p-2 sm:w-48 sm:shrink-0">
+          <AccountNavButton
+            active={view === "profile"}
+            icon={UserIcon}
+            label="Profile"
+            onClick={() => setView("profile")}
+          />
+          <AccountNavButton
+            active={view === "security"}
+            icon={ShieldIcon}
+            label="Security"
+            onClick={() => setView("security")}
+          />
+          <AccountNavButton
+            active={view === "danger"}
+            icon={TrashIcon}
+            label="Danger zone"
+            danger
+            onClick={() => setView("danger")}
+          />
+          <div className="my-1 border-t border-background" />
+          <AccountNavButton icon={LogOutIcon} label="Sign out" onClick={handleSignOut} />
+        </nav>
 
-      <SignInMethodsSection
-        hasPassword={hasPassword}
-        hasGoogle={hasGoogle}
-        userEmail={user === undefined ? undefined : (user?.email ?? null)}
-      />
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          {view === "profile" && (
+            <section className="flex flex-col gap-4 rounded-2xl bg-surface p-5 text-left">
+              <h2 className="text-lg font-semibold">Profile</h2>
+              <div className="flex flex-col gap-3 text-sm">
+                <div className="flex flex-col gap-1">
+                  <span className="text-muted">Email</span>
+                  <span className="font-medium">{user?.email ?? "—"}</span>
+                </div>
+                {user?.name && (
+                  <div className="flex flex-col gap-1">
+                    <span className="text-muted">Name</span>
+                    <span className="font-medium">{user.name}</span>
+                  </div>
+                )}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-muted">Signed in with</span>
+                  <div className="flex flex-wrap gap-2">
+                    {hasPassword && (
+                      <span className="rounded-full bg-background px-3 py-1 text-xs font-medium">
+                        Password
+                      </span>
+                    )}
+                    {hasGoogle && (
+                      <span className="flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs font-medium">
+                        <GoogleIcon className="h-3.5 w-3.5" />
+                        Google
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
 
-      <section className="flex flex-col gap-3 rounded-2xl bg-surface p-5 text-left">
-        <div>
-          <h2 className="text-lg font-semibold">Sign out</h2>
-          <p className="text-sm text-muted">Signs you out on this device only.</p>
+          {view === "security" && (
+            <>
+              <PasswordSection hasPassword={hasPassword} email={user?.email ?? null} />
+              <SignInMethodsSection
+                hasPassword={hasPassword}
+                hasGoogle={hasGoogle}
+                userEmail={user === undefined ? undefined : (user?.email ?? null)}
+              />
+            </>
+          )}
+
+          {view === "danger" && (
+            <section className="flex flex-col gap-3 rounded-2xl bg-surface p-5 text-left ring-1 ring-danger/30">
+              <div>
+                <h2 className="text-lg font-semibold text-danger">Danger zone</h2>
+                <p className="text-sm text-muted">
+                  Permanently delete your account. This can&apos;t be undone.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(true)}
+                className="self-start rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-background hover:opacity-90"
+              >
+                Delete my account
+              </button>
+            </section>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            void signOut();
-            router.push("/");
-          }}
-          className="self-start rounded-lg bg-background px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-        >
-          Sign out
-        </button>
-      </section>
-
-      <section className="flex flex-col gap-3 rounded-2xl bg-surface p-5 text-left ring-1 ring-danger/30">
-        <div>
-          <h2 className="text-lg font-semibold text-danger">Danger zone</h2>
-          <p className="text-sm text-muted">Permanently delete your account. This can&apos;t be undone.</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setDeleteOpen(true)}
-          className="self-start rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-background hover:opacity-90"
-        >
-          Delete my account
-        </button>
-      </section>
+      </div>
 
       {deleteOpen && (
         <DeleteAccountModal

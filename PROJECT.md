@@ -40,11 +40,17 @@ what exists, what's next, and the honest state of what's been verified.
   ratios are in the mix, whether to avoid repeating the same one twice, and an optional "return to
   original tempo" mode that alternates modulate-away/return-home instead of drifting freely. Shows the
   upcoming tempo ahead of time and logs each modulation for the run in a `ToolLayout` `sidePanel`
-  (see below). An optional second click (own tone, own mute, own `BeatIndicator`) runs the whole
-  time as a second track on the _same_ `startClickEngine` call (see below) so it can hear/see it
-  against whatever the main click has modulated to — pinned to the true starting tempo in "return
-  to original" mode, or otherwise always the tempo the main click just left (one modulation
-  behind). Each modulation carries an exact `num`/`den` (e.g. 3:2), so it also shows what the new
+  (see below). An optional second click — the "Previous tempo click" (`playOriginalTempo`; own
+  tone, own mute, own `BeatIndicator`) — runs the whole time as a second track on the _same_
+  `startClickEngine` call (see below) so it can hear/see it against whatever the main click has
+  modulated to — pinned to the true starting tempo in "return to original" mode, or otherwise
+  always the tempo the main click just left (one modulation behind, which is what the toggle's
+  name reflects — it's usually tracking the *previous* tempo, not literally the original one).
+  Turning it on also forces "play until tempos realign" (`matchToRealignment`) on and locks it
+  there (disabled, can't be switched off) until the previous-tempo click is turned off again —
+  that's what keeps the reference click's own realignment math meaningful; letting the two vary
+  independently could leave it silently out of sync with the main click. Each modulation carries
+  an exact `num`/`den` (e.g. 3:2), so it also shows what the new
   tempo's quarter note is worth in the reference tempo's note values where that reduces to a
   single clean name (`describeQuarterEquivalence` in `lib/metricModulation.ts`; several ratios,
   like 4:3, genuinely don't and show nothing). The modulation itself is applied from inside
@@ -238,6 +244,66 @@ what exists, what's next, and the honest state of what's been verified.
   value yet the same tick a key is clicked). Each key's `onMouseDown` prevents the browser's
   default focus-shifting-to-the-button behavior, so the answer field never visibly loses focus to
   a keypad tap at all.
+- **Practice Timer** (`components/PracticeTimer.tsx`, `lib/practiceTimer.ts`,
+  `lib/practiceTimerEngine.ts`) — chains named timers back to back (e.g. "10 min scales, 5 min
+  break, 10 min tune"), or runs a configurable Pomodoro (work/short break/long break minutes,
+  cycles before a long break, and either a fixed total number of work cycles or "keep going
+  indefinitely", mirroring Jam Practice's own toggle of that name). Work cycles can each have
+  their own name (`PomodoroConfig.workTitles: string[]`, editable as an ordered add/remove/
+  reorder list in the editor, same shape as a custom session's segment list) — e.g.
+  `["Scales", "Chords", "Improv"]` names cycle 1 "Scales", cycle 2 "Chords", cycle 3 "Improv",
+  cycle 4 back to "Scales", wrapping via modulo so it works for an indefinite session too (no
+  fixed cycle count to size the list to) and for any totalCycles/list-length mismatch; an empty
+  list, or a blank entry in it, falls back to plain "Work" for that cycle. Breaks are deliberately
+  **not** individually nameable — just the fixed "Short break"/"Long break" labels — per an
+  explicit follow-up request narrowing this down from an earlier version that made all three step
+  kinds nameable. `lib/practiceTimer.ts` is pure
+  session-shape logic with no engine/UI concerns: a `PracticeSession` is a discriminated union
+  (`type: "custom"` with a `Segment[]`, or `type: "pomodoro"` with a `PomodoroConfig`), and
+  `stepAt(session, index)` is the one function both the engine and the UI call to ask "what's step
+  N" — for Pomodoro this lazily expands the work/break pattern (`pomodoroStepAt`) rather than ever
+  materializing a real array, since an indefinite Pomodoro has no fixed length.
+  `lib/practiceTimerEngine.ts` is a self-contained, module-level-state JS engine — same shape as
+  `lib/clickEngine.ts`, not tied to any component's lifecycle — exposed via a `subscribe`/
+  `getSnapshot` pair so any component (the tool page, the sidebar widget, the mobile badge) can be
+  an independent `useSyncExternalStore` view onto one shared running timer, none of them
+  responsible for keeping it alive. It's also the first timer in this codebase built to survive an
+  actual page reload, not just a re-render: `startedAt` is wall-clock (`Date.now()`), not
+  `performance.now()` like every other timer/ring here, and the whole state round-trips through
+  `localStorage` (`jam-practice-timer-running`) so `ensureInitialized()` can restore it on the next
+  load — paused restores frozen as-is; a still-running step restores and reschedules against
+  however much time is actually left; a step whose time had already fully elapsed while the tab
+  was closed advances exactly one step fresh (no chime, no attempt to simulate/cascade through
+  every step that might have silently elapsed for a long-closed tab). `components/
+  PracticeTimerRing.tsx` is the tool page's own countdown ring + "M:SS" label — deliberately
+  **not** built on the shared `CountdownRing`/`CountdownLabel` (hardcoded to `performance.now()`,
+  the page-load-relative clock every other timer here uses); an earlier version of this component
+  converted into `performance.now()` terms via `performance.timeOrigin` specifically to reuse
+  those shared components without modifying them, but that produced a running-timer display that
+  didn't match the sidebar widget's own (correct) reading of the same segment — diagnosed as a bug
+  in that conversion rather than chasing it further, since this sandbox has no browser to actually
+  debug a `performance.timeOrigin` mismatch in. Replaced with a small self-contained component
+  that computes straight off `Date.now()` — the exact same clock `lib/practiceTimerEngine.ts`
+  itself and `PracticeTimerWidget.tsx` already use — and formats via the shared `formatClock`
+  (`lib/practiceTimer.ts`, "M:SS", e.g. "24:59" — not `formatMinutes`, which is for a *static*
+  duration label like "10 min", not a ticking countdown), so the tool page and the sidebar/mobile
+  widget literally cannot show two different numbers for the same running step anymore, and a long
+  segment reads as minutes:seconds instead of a raw, hard-to-parse second count. While paused, it
+  freezes at `remainingMsAtPause` instead of the live tick. `components/PracticeTimerWidget.tsx` is the
+  "what's running right now" glimpse shown outside the tool itself while a session is active — a
+  card in the desktop sidebar footer (both its full and collapsed widths, `components/Sidebar.tsx`)
+  or a fixed top-right badge on mobile mirroring the hamburger button's top-left placement
+  (`app/layout.tsx`) — every view just a link back to `/practice-timer`, no controls, so it stays a
+  glimpse rather than a second copy of the running-timer UI; renders nothing while nothing's
+  running. Saved sessions sync per Jack's explicit call on how sophisticated this should be: signed
+  out, they live in `localStorage` via `lib/practiceSessionsStore.ts` (the same hand-rolled
+  external-store shape as `lib/tunesStore.ts`); signed in, `lib/usePracticeSessions.ts` reads/
+  writes the `practiceSessions` Convex table instead (`convex/practiceSessions.ts`) — **with no
+  merge at all**: signing in simply stops consulting local storage, it doesn't import, offer a
+  choice, or look at what's already there. Both `useConvexAuth()` and the Convex/local-store hooks
+  in `usePracticeSessions` run unconditionally on every render regardless of sign-in state, per
+  rules-of-hooks; only the returned `sessions`/mutators branch on it, same pattern as
+  `AccountPage.tsx`.
 - **Chord Charts** (`components/ChordCharts.tsx`, `components/ChordChart.tsx`,
   `lib/iRealPro.ts`) — paste an iReal Pro playlist link (the `irealb://...` links shared on the
   iReal Pro forums) and read its charts, styled to match the site. The link's chord data is
@@ -280,10 +346,117 @@ what exists, what's next, and the honest state of what's been verified.
 
 ## Backend (Convex)
 
-Phase 1 of a planned multi-phase addition (accounts, then syncing data across devices) — **so
-far, accounts only, nothing syncs yet.** Every tool's actual data (tunes, chord charts, trainer
-stats/history, recordings, ...) is still pure localStorage/IndexedDB, completely unaffected; every
-tool still works fully with no account. This section will grow as later phases land.
+Phase 1 was accounts only, nothing synced; Practice Timer's saved sessions came next as the first
+synced *domain* (its own dedicated `practiceSessions` table — see its bullet in the tools list
+above). This phase generalized that to **every tool's settings and data**, in one pass rather than
+domain-by-domain: tunes, every trainer's instrument/tolerance/playback/pool settings *and* their
+lifetime struggle stats and timed history, the Chord Charts library, Metronome/Tuner/Slow Downer/
+Recorder's settings, all of it. Every tool still works fully with no account — signing in is still
+a pure addition, never a requirement.
+
+**The sync rule is the same everywhere, and it's deliberately simple: no merge.** Signed out, a
+tool reads/writes this device's localStorage exactly as it always has. Signed in, it reads/writes
+the account instead, full stop — whatever's already in localStorage on that device is **not**
+imported, merged, or offered as a choice; it's just not consulted anymore. This was an explicit
+simplification Jack asked for over a fancier first-login merge-prompt design that had been
+sketched earlier (three-way "keep local / use synced / merge both" choice) — simpler to reason
+about, simpler to implement correctly, and the risk case an elaborate merge exists to avoid
+(silently losing data) can't happen when there's nothing automatic to get wrong: you'd have to
+explicitly want the account's version by signing in.
+
+**One generic mechanism covers nearly all of it**, rather than a hand-typed Convex table per tool
+(what the original two-domain plan called for, and genuinely fine at that scale — not at
+literally-every-tool scale). Every tool's settings object already round-trips through
+`JSON.stringify`/`JSON.parse` for `usePersistedSettings` (`lib/usePersistedSettings.ts`) — that's
+what makes it localStorage-safe today — so it's already guaranteed JSON-safe, and storing it as
+one opaque blob account-side means a new tool, or a new field on an existing tool's settings, never
+needs a matching schema change on the Convex side:
+- `convex/schema.ts`'s `syncedSettings` table — one row per `(userId, key)`, `value` holding that
+  tool's *entire* settings object as one JSON string. `key` is simply that tool's own existing
+  localStorage key string, reused as-is (e.g. `"jam-practice-note-trainer"`,
+  `"jam-practice-metronome"`) — one obvious key per call site, not a second naming scheme to keep
+  in sync alongside it. `convex/syncedSettings.ts` (`get`/`set`, both scoped to
+  `getAuthUserId(ctx)`) is the only Convex code this needed.
+- `lib/syncedStore.ts` — the shared machinery underneath `useSyncedSettings`/`useSyncedTunes`: a
+  module-level, per-`key` in-memory cache of "the current value while signed in"
+  (`getSyncedValue`/`setSyncedValue`/`seedSynced`/`resetSynced`/`subscribeSynced`), updated
+  *synchronously* on every local edit and written to Convex only after a `DEBOUNCE_MS` (600ms)
+  quiet period. This exists because the first version of these hooks — writing straight to Convex
+  on every `update()` call, with "current value" derived fresh from `useQuery`'s result each
+  render — had two real problems, both hit directly: adding several tunes quickly (multiple
+  standards in a row) silently dropped all but the last one, and the whole site felt sluggish
+  since *every* setting change, however small, was a live network round-trip. The stale-closure
+  drop happened because two rapid `update()` calls both closed over the same pre-edit snapshot (the
+  query hadn't echoed the first write back yet), so the second call's "previous value" excluded the
+  first call's edit; keeping the authoritative "current value" in a synchronous module-level cache
+  instead of a value closed over from a stale render fixes that — every edit reads whatever the
+  *last* edit actually left behind, never a stale echo. The network-call flood is fixed by the
+  debounce: a local edit updates the cache and every subscribed component instantly (still feels
+  synchronous to type/drag against), but only the *last* value in a burst of edits actually gets
+  sent, once the burst goes quiet. `seedSynced` only applies a value the *first* time a real server
+  read arrives for a key in the current signed-in session (never overwriting an edit already made
+  locally with a lagging echo of the old value); `resetSynced`, called on sign-out, clears that
+  so a different account signing in afterward re-seeds fresh instead of quietly showing the
+  previous account's cached values — and flushes any not-yet-fired debounced write immediately
+  first, so an edit made right before signing out still lands rather than being silently dropped.
+  Verified with a synthetic Node script exercising all of this directly (rapid-edit accumulation +
+  single collapsed write, seed-never-clobbers-a-local-edit, reset-flushes-then-clears) — see
+  "What's genuinely untested" for what that script can't cover (an actual live Convex round-trip).
+- `lib/useSyncedSettings.ts` — a **drop-in replacement** for `usePersistedSettings(key, defaults)`:
+  identical signature, identical `[settings, update]` return shape, identical "defaults must be a
+  stable module-level object" rule. Signed out it's a pure passthrough to the real
+  `usePersistedSettings` (zero behavior change, zero regression risk — it's the same code
+  underneath) *and* the Convex query is passed `"skip"` instead of real args, so a signed-out
+  visitor never opens a live subscription for data they can't have at all (a real, avoidable cost
+  the first version paid on every tool, every page load, regardless of sign-in state). Signed in,
+  it reads/writes through `syncedStore.ts` as described above. The defensive "keep only fields
+  whose type matches defaults" logic that protects a tool's UI from corrupt/foreign localStorage
+  data (`mergeWithDefaults`, extracted out of `lib/usePersistedSettings.ts`'s previously-private
+  `read()` so both paths share it) applies identically to whatever comes back from the account, for
+  the same reason. Every tool's own `usePersistedSettings(SETTINGS_KEY, DEFAULT_SETTINGS)` call
+  became `useSyncedSettings(SETTINGS_KEY, DEFAULT_SETTINGS)` — that one-line swap, nothing else in
+  the component changed, since `noteStats`/`history`/every other field a trainer already keeps in
+  that same settings object rides along automatically. Both `useConvexAuth()` and the underlying
+  Convex `useQuery`/`useMutation` calls run unconditionally regardless of sign-in state, per
+  rules-of-hooks — only the *returned* value, what `update` writes, and the query's `"skip"`
+  argument branch on it (same pattern as every other signed-in-aware code in this codebase, e.g.
+  `AccountPage.tsx`).
+- `lib/useSyncedTunes.ts` — the one exception to "every tool goes through `useSyncedSettings`":
+  Jam Practice's tune list isn't a `usePersistedSettings` object, it's `lib/tunesStore.ts`'s own
+  hand-rolled external store (`subscribe`/`getSnapshot`/`setTunes`, used directly via
+  `useSyncExternalStore` at four separate call sites — `JamPractice.tsx`, `TunesPanel.tsx`,
+  `TunesManager.tsx`, `StandardsPicker.tsx`). Same "one JSON blob per key" shape fits it fine
+  though, so it rides the *same* `syncedSettings` table, `syncedStore.ts` debounce/race-fix
+  machinery, and `"skip"`-when-signed-out optimization under a fixed key, `"tunes"` — no table of
+  its own. `useSyncedTunes()` is a drop-in replacement for that `useSyncExternalStore(...)` triple,
+  returning the same `[tunes, setTunes]` shape, so all four call sites needed only an import swap.
+  The debounced write in `syncedStore.ts` fires from a `setTimeout` (not from inside a React
+  render) but still calls the owning hook's own `useMutation`-returned function, captured in the
+  closure `setSyncedValue`/`resetSynced` are given — confirmed safe by reading Convex's own
+  `useMutation` source (`node_modules/convex/dist/esm/react/client.js`): it returns a plain
+  function bound only to the client instance and the mutation reference via `useMemo`, with no
+  dependency on the calling component's own mount state, so it's still callable well after that
+  component has unmounted.
+- **What deliberately did *not* move to this mechanism**, and why:
+  - Pure UI chrome — `CollapsiblePanel`/`OptionsCard`'s open/collapsed + "show hints" state
+    (`lib/panels.ts`), the sidebar's width/collapsed state (`components/Sidebar.tsx`), the
+    options-column/side-panel hidden toggles. None of this is "this tool's data" the way Jack meant
+    it — it's per-device layout, and a phone and a desktop reasonably want different panel layouts
+    anyway. Stayed on plain `usePersistedSettings`, unaffected by sign-in.
+  - Chord Charts' `VIEW_KEY` (`selectedId`, `barsPerRow`) — a device-local display preference, not
+    data — this file already drew exactly this line between `LIBRARY_KEY` (synced) and `VIEW_KEY`
+    (not) before sync existed at all; sync just followed the line that was already there.
+  - Waveform markers (`lib/markers.ts`) — small JSON, but keyed to a locally-uploaded file
+    (`"<filename>|<filesize>"`) that isn't itself synced (see next bullet), so a synced marker set
+    would be a dangling reference pointing at nothing on another device.
+  - Recorder's project metadata and Slow Downer's loaded files — genuinely out of scope, unchanged
+    from the original plan: the actual audio lives in IndexedDB as `Blob`s (`lib/projectStore.ts`,
+    `lib/fileLibrary.ts`), which needs Convex file storage and a real sync design, not a JSON blob
+    write. Both tools' small *settings* objects (volume, snap, track height, ...) did switch to
+    `useSyncedSettings` like everything else — only the large binary data stayed local.
+  - Theme (`lib/theme.ts`) — arguably could be nice to follow you across devices, but it's an
+    app-wide display preference, not a specific tool's "options" in the sense Jack asked for, and
+    wasn't part of this request — left alone, a candidate for later if it's ever actually wanted.
 
 **Deploying it — two separate targets, not automatic together by default.** A `git push` alone
 only redeploys the frontend (Vercel); it does *not* push anything under `convex/` to the
@@ -302,9 +475,15 @@ safe to run inside an automated build at all — `npx convex deploy` refuses to 
 under a personal login (confirmed directly: it prompts "Do you want to push your code to your prod
 deployment now?" and hard-refuses even with `CI=1` set or `y` piped into stdin — a deploy key is
 the only way around that prompt, not a flag).
-- `convex/schema.ts` — currently just `{...authTables}` (Convex Auth's own tables: `users`,
-  `authAccounts`, `authSessions`, etc.). No app data tables yet — those get added one at a time,
-  each alongside the phase that actually uses it.
+- `convex/schema.ts` — `{...authTables}` (Convex Auth's own tables: `users`, `authAccounts`,
+  `authSessions`, etc.) plus `pendingConfirmations` (below) and two app-data tables:
+  `practiceSessions` (`convex/practiceSessions.ts` — list/create/update/remove, all scoped to
+  `getAuthUserId(ctx)`), one row per saved Practice Timer session, shaped like
+  `lib/practiceTimer.ts`'s `PracticeSession` minus its own `id` (the Convex document id doubles as
+  that once synced); and `syncedSettings` (`convex/syncedSettings.ts` — `get`/`set`), the generic
+  one-JSON-blob-per-`(userId, key)` table every other tool's settings (and Jam Practice's tunes)
+  sync through — see this section's own paragraph above for why that one's generic rather than
+  hand-typed per tool.
 - `convex/auth.ts` — `convexAuth({ providers: [Password({ verify: ResendOTP }), Google] })`.
   Google is listed in code already but **won't actually work** until `AUTH_GOOGLE_ID`/
   `AUTH_GOOGLE_SECRET` are set on the deployment (`npx convex env set ...`) and a matching OAuth
@@ -352,16 +531,24 @@ the only way around that prompt, not a flag).
   the mobile overlay), same `collapsed`/`large` prop shape, plus an `onNavigate` so the mobile
   overlay closes itself on tap, same as every other nav link there.
 - **`/account`** (`app/account/page.tsx` / `components/AccountPage.tsx`) — password (change or set
-  one for the first time), sign-in methods (connect/disconnect Google), and delete account.
-  Creating an account, changing/setting a password, and deleting an account (except a Google-only
-  account — see below) all now require confirming a code emailed first, per an explicit follow-up
-  request; a "forgot password" *reset* flow (recovering access when you don't know your *current*
-  password at all) is still deliberately not implemented — a different thing from the email
-  confirmations this section describes, and still out of scope. No route protection, consistent
-  with the rest of the app — visiting it signed out just shows a plain "you're not signed in"
-  message instead of redirecting. `convex/account.ts`'s `linkedProviders` query (which providers —
-  `"password"`, `"google"` — are on the signed-in user's `authAccounts` rows) drives which of
-  these sections show what.
+  one for the first time), sign-in methods (connect/disconnect Google), and delete account, laid
+  out as its own small Profile/Security/Danger zone sidebar (`AccountNavButton`, a plain
+  `useState<AccountView>` tab switch, not routing — the page itself widens from the loading/
+  signed-out states' `max-w-md` to `max-w-3xl` via `PageShell`'s `wide` prop to fit it, and stacks
+  to a full-width column above the content on narrow screens rather than a fixed sidebar): Profile
+  is a read-only summary (email, name if the account has one, which providers are linked); Security
+  holds `PasswordSection` + `SignInMethodsSection`; Danger zone holds the delete-account section.
+  Sign out sits below a divider at the bottom of that same nav list as a direct action (not a
+  fourth view — clicking it signs out immediately, same as the plain button it replaced). Creating
+  an account, changing/setting a password, and deleting an account (except a Google-only account —
+  see below) all now require confirming a code emailed first, per an explicit follow-up request; a
+  "forgot password" *reset* flow (recovering access when you don't know your *current* password at
+  all) is still deliberately not implemented — a different thing from the email confirmations this
+  section describes, and still out of scope. No route protection, consistent with the rest of the
+  app — visiting it signed out just shows a plain "you're not signed in" message instead of
+  redirecting. `convex/account.ts`'s `linkedProviders` query (which providers — `"password"`,
+  `"google"` — are on the signed-in user's `authAccounts` rows) drives which of these sections show
+  what.
   - **Password** (`PasswordSection`) is one section that's either "Change password" (has one
     already) or "Set a password" (Google-only so far) — same `linkedProviders` check throughout
     this feature — and now a two-step flow either way: step 1 (`requestPasswordConfirmation`)
@@ -530,7 +717,10 @@ the only way around that prompt, not a flag).
     "add a new setting" as also meaning "add its hint."
 - `lib/usePersistedSettings.ts`: the localStorage-backed settings hook nearly every tool uses.
   **Always pass a module-level constant default object**, never an inline literal, or the
-  `useSyncExternalStore` memoization (and SSR-safety) breaks.
+  `useSyncExternalStore` memoization (and SSR-safety) breaks. A new tool's settings should use
+  `lib/useSyncedSettings.ts` instead — identical signature and rule, but also syncs to the
+  account when signed in (see "Backend (Convex)" below); reach for the plain, unsynced hook only
+  for something deliberately device-local (a display preference, not real tool data).
 - `components/Select.tsx`, `SwitchRow.tsx`, `ConfirmDialog.tsx`, `PromptDialog.tsx`,
   `NumberField.tsx`, `KeyHint.tsx`, `HelpButton.tsx`, `ContextMenu.tsx`: shared
   form/dialog/menu primitives.
@@ -540,6 +730,28 @@ the only way around that prompt, not a flag).
   touching; it's the most complex part of the codebase.
 - `components/tools.tsx`: every icon component plus `NAV_LINKS` (the sidebar/search/title-icon
   source of truth) and `TOOLS` (currently unused, `NAV_LINKS` minus `/`).
+- **Favorites** (`lib/useFavorites.ts`, `components/Sidebar.tsx`'s `NavItems`) — a star next to
+  each tool in the sidebar (desktop and the mobile overlay both, via the same shared `NavItems`);
+  clicking it adds/removes that tool from a "Favorites" section shown above the normal categories
+  (each favorited tool still also stays in its own category below — a quick-access shortcut, not a
+  relocation). **Account-only, on purpose** — unlike every other synced setting in this app, there
+  is no signed-out local fallback: the star and the Favorites section simply don't render at all
+  unless signed in (`useFavorites`'s `isAuthenticated` gate), since which tools you reach for most
+  is tied to *you*, not a particular device/browser. Still rides the same generic `syncedSettings`
+  Convex table as everything else (a fixed key, `"jam-practice-favorites"`, holding `{hrefs:
+  string[]}`) rather than a bespoke account-only mechanism — the signed-out branch
+  `useSyncedSettings` always has underneath still technically exists here too, it's just never
+  surfaced in the UI. Visually the star sits *inside* each nav button, at its right edge, so the
+  button itself stays full width — but it's a DOM sibling of the row's `<Link>`, not actually
+  nested inside it (a `<button>` inside an `<a>` is invalid HTML and breaks click handling),
+  absolutely positioned over padding the link reserves for it (`pr-11`/`pr-14`) whenever it can
+  show, so nothing shifts when it fades in, and stacked on top (`z-10`) so a click there hits the
+  star, not the link underneath. Only shown when not collapsed (no room for it in the icon-only
+  collapsed sidebar) and signed in. Visibility beyond that: an already-favorited star always stays
+  visible, so what's starred is visible at a glance without hovering; an unfavorited one is hidden
+  on desktop until the row's hovered or the star itself is keyboard-focused (`opacity-0
+  group-hover:opacity-100 focus-visible:opacity-100`), but always visible on mobile regardless,
+  where there's no hover to reveal it.
 - `lib/noteSpelling.ts` (accidental spelling: sharp/flat/random/both), `lib/trainerUtils.ts`
   (`formatDuration`, `shuffled`), and `components/AdvancedSlider.tsx` /
   `CountdownRing.tsx` / `CountdownLabel.tsx` / `ElapsedTimer.tsx`: pulled out of Note Trainer when
@@ -554,19 +766,70 @@ the only way around that prompt, not a flag).
   Note Trainer keys it by note and Scale Trainer by mode id. Reuse these before adding another
   drill/quiz-style tool.
 - `lib/tones.ts`: the "Tone" dropdown shared by Note/Scale/Interval Trainer's "Play note/scale/
-  interval out loud" and Guess the Interval's playback (`TONES`, `DEFAULT_TONE_ID`, `playNote`).
-  Each `Tone` is just an `id`/`label` plus a `play(ctx, freq, durationSeconds)` function building
-  its own Web Audio graph from scratch per note — simple waveforms (triangle/sine/square/sawtooth,
-  plus "organ"/"pluck" as hand-picked `PeriodicWave` Fourier coefficients) share one `waveTone`
-  helper, while "Piano" and "Rhodes" are their own small synthesis functions: Piano sums five
-  detuned-off-exact-integer sine partials (real strings are slightly inharmonic) through a lowpass
-  filter that sweeps darker over the note's length (a hammer strike is bright and decays duller);
-  Rhodes is 2-operator FM (a sine carrier, a sine modulator an octave up) whose modulation index
-  decays quickly from a bright attack "bark" into a smoother sustained tone. Both are synthesized,
-  not sampled — there's no audio-asset pipeline anywhere in this app (everything's synthesis or
-  the mic), so "actual instrument sounds" here means a better *model* of the instrument, not a
-  recording of one. `DEFAULT_TONE_ID` is still "triangle" (unchanged, so existing persisted
-  settings aren't affected) — Piano/Rhodes are opt-in via the Tone dropdown, not a new default.
+  interval out loud", Guess the Interval/Guess the Chord's playback, and Practice Timer's
+  transition chime (`TONES`, `DEFAULT_TONE_ID`, `playNote`). Each `Tone` is just an `id`/`label`
+  plus a `play(ctx, freq, durationSeconds)` function — simple waveforms (triangle/sine/square/
+  sawtooth, plus "organ"/"pluck" as hand-picked `PeriodicWave` Fourier coefficients) share one
+  `waveTone` helper building its own Web Audio graph from scratch per note. "Piano" and "Rhodes"
+  used to be synthesis functions too (a five-partial detuned-sine model and a 2-operator FM patch,
+  respectively) but are now real recordings via `lib/sampledTones.ts` — this app's first actual
+  audio *assets*, per an explicit request to stop approximating and use real samples. Neither
+  sample set ships in the repo: the browser `fetch()`s the specific note it needs directly from the
+  sample's origin host the first time that note comes up (Piano: the Salamander Grand Piano,
+  Alexander Holm, CC-BY, hosted by the Tone.js project, sampled at A/C/D#/F# every octave, 30
+  notes; Rhodes: the FluidR3 GM SoundFont's "Electric Piano 1" patch converted to per-note mp3s by
+  the midi-js-soundfonts project, CC-BY, every semitone across the full 88-key range) and
+  `decodeAudioData`s it into an `AudioBuffer`, cached in a module-level `Map` keyed by URL for the
+  rest of the tab's lifetime — so only the very first play of a given sample note pays a
+  network/decode cost; every repeat, and the browser's own normal HTTP cache on a later visit, are
+  instant. A requested note without its own recording gets the *nearest* sample, pitch-shifted via
+  `playbackRate` to the exact target frequency — continuous, not limited to semitone steps, same as
+  the synthesized tones could render any frequency exactly. Both sets' filenames are generated from
+  MIDI note numbers (`midiToAppName`/`midiToFlatName`) rather than hand-typed, and every generated
+  URL (118 across both sets) was spot-checked for real — several edge/middle/flat-spelled notes
+  fetched directly and confirmed to return actual mp3 data, not guessed from memory. CC-BY requires
+  attribution, which lives on `/credits` (`app/credits/page.tsx`, linked from `Home.tsx`'s footer,
+  same `LegalPage` shell as `/privacy`/`/terms`) rather than cluttering every tool that has a Tone
+  dropdown. `DEFAULT_TONE_ID` is still "triangle" (unchanged, so existing persisted settings aren't
+  affected) — Piano/Rhodes stay opt-in via the Tone dropdown, not a new default, for every Tone
+  picker *except* Guess the Interval's and Guess the Chord's: those two ("Ear Training" tools,
+  specifically — not the other trainers' own "play out loud" Tone pickers or Practice Timer's
+  chime, which still offer the full list) were narrowed to real samples only, per a direct
+  follow-up request once the samples actually sounded good — `EAR_TRAINING_TONES` (just Piano and
+  Rhodes) and `DEFAULT_EAR_TRAINING_TONE_ID` ("piano") in `lib/tones.ts`, filtered from the same
+  `TONES` array rather than a separate list to maintain, so a new tone added to `TONES` later needs
+  a one-line decision (does it belong in this filter too) rather than being duplicated by hand.
+  Each of those two components also clamps its own persisted `toneId` against
+  `EAR_TRAINING_TONES` (same pattern as their existing `accidentalStyle` clamp) — a `toneId` saved
+  before this narrowing (e.g. still `"triangle"`) falls back to the new default instead of
+  silently pointing at a tone no longer offered in the dropdown. `playNotesTogether(notes,
+  durationSeconds, toneId)` is the other export alongside `playNote` — used wherever several notes
+  need to actually start together (Guess the Chord's block voicing, Guess the Interval's harmonic
+  playback), not just be *called* around the same moment. Reported directly: with Piano/Rhodes, one
+  note of a block chord would play slightly before the others on a first play, but a replay was
+  always fine. Cause: each `playNote` call independently awaited its own sample's fetch+decode
+  (`lib/sampledTones.ts`), so if a chord's notes needed different sample files and only some were
+  already cached, each note computed "now" whenever *its own* fetch happened to resolve — on replay
+  everything's cached so every note resolves near-instantly and the skew vanishes on its own, which
+  is exactly why it only showed up on a first play. Scheduling every note for the same future
+  `AudioContext` time turned out not to be a real fix on its own: a sample that's still mid-fetch
+  when that moment arrives simply doesn't exist yet to play, so it'd still start late regardless of
+  what start time was requested (a dead end worth recording so it isn't tried again) — Web Audio
+  scheduling can't paper over a network request that hasn't finished. The actual fix is
+  `Tone.prepare?: (ctx, freq) => Promise<void>` (optional; absent for every synthesized tone, which
+  has nothing to preload) plus `lib/sampledTones.ts`'s `prepareSampledNote`, which fetches+decodes
+  into the same `bufferCache` `playSampledNote` reads from without playing anything.
+  `playNotesTogether` awaits `Promise.all` of every note's `prepare` call *before* computing a
+  shared start time and playing any of them — so a chord genuinely waits for its slowest note to
+  finish loading before any note sounds, rather than the fast notes racing ahead. Verified with a
+  synthetic script using a fake `AudioContext` whose `currentTime` actually advances in real time
+  (necessary — a static fake clock can't distinguish "fixed" from "reads `ctx.currentTime` fresh
+  whenever each note happens to resolve", the bug, since both would trivially produce the same
+  value against a clock that never moves) and two notes with deliberately different, real
+  `setTimeout`-based fetch delays (5ms vs 150ms): both end up scheduled at the *exact* same
+  Web Audio time, and that time is provably after the real ~150ms wait actually elapsed, not "0" by
+  coincidence — plus a second check that a synthesized tone (no `prepare` step) still resolves
+  near-instantly through the same function, unaffected.
 
 ## What's genuinely untested
 
@@ -614,12 +877,60 @@ from something that used to work:
   synthetic string-splicing check that's all `insertSymbol`'s logic itself got). None of this is
   something this sandbox's lack of a browser can confirm beyond the synthetic parser/round-
   generation/prefill checks already run against `lib/chords.ts` directly.
-- `lib/tones.ts`'s "Piano" and "Rhodes" tones: entirely untested by ear — the synthesis (partial
-  gains/ratios, filter sweep, FM modulation index/decay time) was only checked structurally, with
-  a mocked Web Audio graph asserting the right nodes get created/connected/started with sane
-  values, never against what it actually sounds like or how loud it is next to the older tones
-  (whose gain constants were themselves presumably ear-tuned at some point). Likely needs a
-  balance pass once someone can actually listen.
+- `lib/sampledTones.ts`'s "Piano" and "Rhodes" tones: every generated sample URL was checked for
+  real (a script fetching representative ones — both range edges, a middle note, and a
+  flat-spelled filename from each set — and confirming actual mp3 bytes come back, not a guess
+  from memory), and the note-name/frequency/nearest-sample-selection math has a synthetic test
+  against the real `noteToFrequency`. Jack reported the samples playing louder in one ear —
+  both sets are real stereo recordings (an actual mic'd piano, unlike every other tone here, a
+  single inherently-centered mono oscillator), so whatever left/right balance the recording itself
+  happened to have was passing straight through; fixed by forcing the gain node's `channelCount`/
+  `channelCountMode`/`channelInterpretation` to explicitly downmix to a centered mono signal before
+  it reaches `ctx.destination` (the Web Audio spec's standard L+R downmix rule), verified with a
+  mocked-Web-Audio-graph script asserting those three properties actually land on the node — but
+  **not re-confirmed by ear**, since this sandbox still has no audio output; take "fixed" as
+  "the mechanism that would cause this is now provably absent from the graph," not "confirmed
+  centered by listening." Also still unconfirmed: whether the pitch-shifted notes between recorded
+  samples (especially the piano set's wider, every-third gaps) still sound convincingly like a real
+  piano rather than audibly "chipmunked" or "slowed down"; how loud the samples are next to this
+  app's other tones (no gain matching was done — the samples' own recorded levels are used as-is,
+  now just centered); whether the 80ms release ramp on cutoff sounds natural against a real
+  recording's own decay tail versus clicking or cutting it off abruptly; the actual first-note
+  network/decode latency in practice; and whether `AudioContext.decodeAudioData`'s promise-based
+  (no-callback) form is supported by every browser this app otherwise targets. Jack also reported a
+  block chord's notes not starting quite together on a first play (fine on replay) — fixed via
+  `playNotesTogether`'s prepare-then-schedule redesign (see `lib/tones.ts`'s bullet above) and
+  verified with a synthetic script proving two notes with deliberately different fetch delays
+  converge on the exact same Web Audio start time, but same caveat as the left/right fix: not
+  re-confirmed by ear in a real browser, since that's still not something this sandbox can do.
+- Practice Timer: the engine's live start/pause/resume/skip/stop/auto-advance behavior and its
+  restore-from-`localStorage` paths (paused, mid-step, and time-fully-elapsed-while-away) are all
+  checked with synthetic Node scripts driving `lib/practiceTimerEngine.ts` directly against a
+  mocked `window.localStorage` — but never in a real browser: an actual page reload genuinely
+  resuming a running session, the sidebar widget/mobile badge staying in sync with the tool page
+  across navigation (the whole reason the tool page's own `Date.now()`-based ring replaced an
+  earlier `performance.timeOrigin`-converted one — see the tool's own bullet above — was Jack
+  actually seeing the two disagree; this sandbox can't reproduce or re-check that by eye at all),
+  and the transition chime (`playTransitionChime`, `lib/tones.ts`) are all unverified by ear/eye.
+  The signed-in-reads-
+  Convex-only sync switch (`lib/usePracticeSessions.ts`) type-checks and the schema/functions
+  deploy cleanly to the dev backend, but the actual cross-device behavior — including that signing
+  in really does ignore whatever's in local storage rather than merging it — hasn't been clicked
+  through.
+- **Every tool's account sync** (`lib/useSyncedSettings.ts`, `lib/useSyncedTunes.ts`,
+  `convex/syncedSettings.ts`): `tsc`/`pnpm lint`/`pnpm build` all pass and `npx convex dev --once`
+  deploys the schema/functions cleanly, but none of the actual signed-in behavior has been clicked
+  through in a real browser — this sandbox can't sign into a real account and watch it happen. In
+  particular, unverified: that a tool's settings genuinely round-trip through the account (change
+  something, refresh, see it persist via Convex rather than localStorage); that signing in with
+  existing local data really does just stop reading it rather than showing something stale or
+  erroring; that all four of Jam Practice's tune-list call sites
+  (`JamPractice.tsx`/`TunesPanel.tsx`/`TunesManager.tsx`/`StandardsPicker.tsx`) stay in sync with
+  each other through `useSyncedTunes` the way they did through the shared `tunesStore` module
+  before; and that a large settings object (Chord Charts' imported-song library in particular,
+  potentially several hundred KB of JSON per `PROJECT.md`'s own note on that data's size) writes
+  and reads back correctly as one `syncedSettings.value` string rather than hitting some
+  unanticipated Convex document-size or `useMutation` payload limit.
 - Tuner: the tone generator and the per-instrument string tunings.
 - Polyrhythm Metric Modulation Metronome: the bar-boundary detection driving each
   modulation (relies on the

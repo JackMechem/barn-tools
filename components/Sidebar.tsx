@@ -5,15 +5,18 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import AccountMenu from "@/components/AccountMenu";
 import { OPEN_PALETTE_EVENT } from "@/components/CommandPalette";
+import PracticeTimerWidget from "@/components/PracticeTimerWidget";
 import ThemeModal from "@/components/ThemeModal";
 import {
   BarnLogo,
   NAV_LINKS,
   SearchIcon,
+  StarIcon,
   filterLinks,
   groupByCategory,
   svgProps,
 } from "@/components/tools";
+import { useFavorites } from "@/lib/useFavorites";
 
 const STORAGE_KEY = "jam-practice-sidebar";
 const DEFAULT_WIDTH = 220;
@@ -176,7 +179,15 @@ function NavItems({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const groups = groupByCategory(filterLinks(query));
+  const { favorites, toggleFavorite, isAuthenticated } = useFavorites();
+  const filtered = filterLinks(query);
+  const groups = groupByCategory(filtered);
+  // A subset of `filtered`, in NAV_LINKS' own order (stable regardless of favoriting order) —
+  // shown as a section of its own above the normal categories, where each item also still stays
+  // in its own category below (a quick-access shortcut, not a "moved out of" relocation).
+  const favoriteItems = isAuthenticated
+    ? filtered.filter((link) => favorites.includes(link.href))
+    : [];
 
   function renderLink({ href, label, icon: Icon, desktopOnly }: NavLink) {
     const active = pathname === href;
@@ -195,15 +206,19 @@ function NavItems({
         </div>
       );
     }
-    return (
+
+    // Room reserved on the right for the star, so it never overlaps the icon/label — reserved
+    // whenever it *can* show (signed in, not collapsed), not just while actually hovered, so nothing
+    // shifts around when it fades in.
+    const showsStar = isAuthenticated && !collapsed;
+    const link = (
       <Link
-        key={href}
         href={href}
         onClick={onNavigate}
         title={collapsed ? label : undefined}
-        className={`flex items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} border px-3 font-medium transition-colors ${
+        className={`flex min-w-0 items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} border px-3 font-medium transition-colors ${
           large ? "py-3 text-base" : "py-2 text-sm"
-        } ${collapsed ? "justify-center" : ""} ${
+        } ${collapsed ? "justify-center" : "w-full"} ${showsStar ? (large ? "pr-14" : "pr-11") : ""} ${
           active
             ? "border-accent/30 bg-accent/10 text-accent"
             : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground"
@@ -213,12 +228,62 @@ function NavItems({
         {!collapsed && <span className="truncate">{label}</span>}
       </Link>
     );
+
+    if (!showsStar) {
+      return <div key={href}>{link}</div>;
+    }
+    // The star sits on top of the link's own right edge (visually "inside" the nav button, so the
+    // button stays full width) rather than actually nested inside it — a <button> inside the <a>
+    // next/link renders is invalid HTML and breaks click handling. It's a sibling in a `relative`
+    // wrapper instead, absolutely positioned over the padding the link reserved for it above, and
+    // stacked on top (`z-10`) so a click there hits the star, not the link underneath it.
+    const isFavorite = favorites.includes(href);
+    return (
+      <div key={href} className="group relative flex items-center">
+        {link}
+        <button
+          type="button"
+          onClick={() => toggleFavorite(href)}
+          aria-label={isFavorite ? `Remove ${label} from favorites` : `Add ${label} to favorites`}
+          aria-pressed={isFavorite}
+          title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          className={`absolute right-1 top-1/2 z-10 flex -translate-y-1/2 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-surface-hover ${
+            large ? "h-11 w-11" : "h-9 w-9"
+          } ${isFavorite ? "text-accent" : "text-muted hover:text-foreground"} ${
+            // An already-favorited star always stays visible (so you can see what's starred at a
+            // glance); an unfavorited one only shows on hover on desktop (no hover on mobile, so
+            // it's always visible there too). focus-visible keeps it reachable by keyboard even
+            // without a mouse hovering it.
+            large || isFavorite
+              ? ""
+              : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+          }`}
+        >
+          <StarIcon className={large ? "h-5 w-5" : "h-4 w-4"} filled={isFavorite} />
+        </button>
+      </div>
+    );
   }
 
   return (
     <nav className="flex flex-col gap-3">
       {groups.length === 0 && (
         <p className={`px-3 text-muted ${large ? "text-base" : "text-sm"}`}>No tools found</p>
+      )}
+      {favoriteItems.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {!collapsed && (
+            <p
+              className={`flex items-center gap-1 px-3 pb-0.5 font-semibold text-muted/70 ${
+                large ? "text-xs" : "text-[0.65rem]"
+              }`}
+            >
+              <StarIcon className={large ? "h-3 w-3" : "h-2.5 w-2.5"} filled />
+              Favorites
+            </p>
+          )}
+          {favoriteItems.map(renderLink)}
+        </div>
       )}
       {groups.map(({ category, items }) => (
         <div key={category} className="flex flex-col gap-1">
@@ -360,6 +425,7 @@ export default function Sidebar() {
             <NavItems large query={query} onNavigate={() => setMobileOpen(false)} />
           </div>
           <div className="mt-auto flex flex-col gap-1 border-t border-surface-hover pt-2">
+            <PracticeTimerWidget />
             <AccountMenu large onNavigate={() => setMobileOpen(false)} />
             <ThemeButton large onClick={() => setThemeOpen(true)} />
           </div>
@@ -414,6 +480,7 @@ export default function Sidebar() {
         )}
         <NavItems collapsed={collapsed} query={query} />
         <div className="mt-auto flex flex-col gap-1 border-t border-surface-hover pt-2">
+          <PracticeTimerWidget collapsed={collapsed} />
           <AccountMenu collapsed={collapsed} />
           <ThemeButton collapsed={collapsed} onClick={() => setThemeOpen(true)} />
         </div>

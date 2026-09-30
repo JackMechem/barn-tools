@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { CheckIcon, PencilIcon, SearchIcon, TrashIcon } from "@/components/tools";
 import { downloadTunesCsv } from "@/lib/csv";
-import { getServerSnapshot, getSnapshot, subscribe } from "@/lib/tunesStore";
+import { useSyncedTunes } from "@/lib/useSyncedTunes";
 import { Tune } from "@/lib/types";
 
 function summary(tune: Tune) {
@@ -26,7 +26,7 @@ export default function TunesManager({
   onEdit: (tune: Tune) => void;
   onDeleteTune: (id: string) => void;
 }) {
-  const tunes = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const [tunes] = useSyncedTunes();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);

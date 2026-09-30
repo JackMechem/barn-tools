@@ -5,6 +5,7 @@ import { FONT_VARIABLE_CLASSES } from "@/app/fonts";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import CommandPalette from "@/components/CommandPalette";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
+import PracticeTimerWidget from "@/components/PracticeTimerWidget";
 import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <ConvexClientProvider>
             <Sidebar />
             <CommandPalette />
+            <PracticeTimerWidget mobile />
             <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-xl lg:border lg:border-surface-hover">
               {children}
             </div>

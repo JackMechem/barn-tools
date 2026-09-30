@@ -398,6 +398,37 @@ export function HomeIcon({ className }: { className?: string }) {
   );
 }
 
+export function ShieldIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  );
+}
+
+export function LogOutIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M9 4H5a2 2 0 00-2 2v12a2 2 0 002 2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
+  );
+}
+
+/** The sidebar's favorite/star toggle — `filled` for a favorited tool, outline otherwise. */
+export function StarIcon({ className, filled }: { className?: string; filled?: boolean }) {
+  return (
+    <svg {...svgProps(className)} fill={filled ? "currentColor" : "none"}>
+      <path
+        d="M12 3.5l2.6 5.4 5.9.6-4.4 4 1.2 5.9L12 16.5l-5.3 2.9 1.2-5.9-4.4-4 5.9-.6z"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Groups tools in the sidebar and search; also fixes their display order. */
 export const CATEGORIES = [
   "Practice",
@@ -455,6 +486,14 @@ export const NAV_LINKS = [
       "Hear a chord — including weird slash chords — and type its symbol, iReal-Pro style (F#^7, Ab-7/D, ...).",
     icon: ChordIcon,
     category: "Ear Training" as Category,
+  },
+  {
+    href: "/practice-timer",
+    label: "Practice Timer",
+    description:
+      "Chain named timers back to back — scales, a break, a tune — or run a configurable Pomodoro. Save sessions to replay later.",
+    icon: StopwatchIcon,
+    category: "Practice" as Category,
   },
   {
     href: "/metronome",

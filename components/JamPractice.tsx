@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import BeatIndicator from "@/components/BeatIndicator";
 import Hint from "@/components/Hint";
 import ToolLayout from "@/components/ToolLayout";
@@ -16,7 +16,7 @@ import { CountOff, parseBeatsPerBar, playCountOff } from "@/lib/metronome";
 import type { BeatLevel } from "@/lib/clickEngine";
 import { usePersistedSettings } from "@/lib/usePersistedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
-import { getServerSnapshot, getSnapshot, setTunes, subscribe } from "@/lib/tunesStore";
+import { useSyncedTunes } from "@/lib/useSyncedTunes";
 import { Key, Tempo, Tune } from "@/lib/types";
 
 type PickResult = {
@@ -36,7 +36,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function JamPractice() {
-  const tunes = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const [tunes, setTunes] = useSyncedTunes();
   const [pick, setPick] = useState<PickResult | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
   const [isCounting, setIsCounting] = useState(false);

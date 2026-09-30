@@ -25,7 +25,7 @@ import { Peaks, analyzeAudio, formatTime } from "@/lib/audioFile";
 import { LibraryEntry, deleteFile, fileId, getFile, listFiles, saveFile } from "@/lib/fileLibrary";
 import { Marker, fileKeyOf, loadMarkers, saveMarkers } from "@/lib/markers";
 import { makeId } from "@/lib/types";
-import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 
 const ADD_FILE_VALUE = "__add-new-file__";
@@ -90,7 +90,7 @@ function TransportButton({
 }
 
 export default function SlowDowner() {
-  const [settings, updateSettings] = usePersistedSettings(SETTINGS_KEY, DEFAULT_SETTINGS);
+  const [settings, updateSettings] = useSyncedSettings(SETTINGS_KEY, DEFAULT_SETTINGS);
   const speed = Math.min(MAX_SPEED, Math.max(MIN_SPEED, settings.speed));
   const { preservePitch, volume, maximized } = settings;
 

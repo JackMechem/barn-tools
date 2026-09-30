@@ -27,7 +27,7 @@ import {
   nearestNoteValue,
   useTapTempo,
 } from "@/lib/meterControls";
-import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 
 const DEFAULT_BPM = 100;
@@ -45,7 +45,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function Metronome() {
-  const [settings, updateSettings] = usePersistedSettings(
+  const [settings, updateSettings] = useSyncedSettings(
     SETTINGS_KEY,
     DEFAULT_SETTINGS,
   );

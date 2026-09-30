@@ -35,9 +35,14 @@ import {
   pcLabel,
   randomChordRound,
 } from "@/lib/chords";
-import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
-import { DEFAULT_TONE_ID, TONES, playNote } from "@/lib/tones";
+import {
+  DEFAULT_EAR_TRAINING_TONE_ID,
+  EAR_TRAINING_TONES,
+  playNote,
+  playNotesTogether,
+} from "@/lib/tones";
 import { ACCIDENTAL_STYLES, AccidentalStyle } from "@/lib/noteSpelling";
 import { formatDuration, shuffled } from "@/lib/trainerUtils";
 import {
@@ -169,7 +174,7 @@ const DEFAULT_SETTINGS = {
   giveRoot: true,
   chordIds: DEFAULT_ENABLED_CHORD_IDS as string[],
   chordStats: {} as Record<string, GradeCounts>,
-  toneId: DEFAULT_TONE_ID,
+  toneId: DEFAULT_EAR_TRAINING_TONE_ID,
   playbackStyle: "block" as PlaybackStyle,
   revealNotes: true,
   accidentalStyle: "sharp" as AccidentalStyle,
@@ -177,7 +182,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function GuessTheChord() {
-  const [settings, updateSettings] = usePersistedSettings(
+  const [settings, updateSettings] = useSyncedSettings(
     SETTINGS_KEY,
     DEFAULT_SETTINGS,
   );
@@ -189,7 +194,6 @@ export default function GuessTheChord() {
     roundCount: rawRoundCount,
     slashChance,
     giveRoot,
-    toneId,
     playbackStyle,
     revealNotes,
   } = settings;
@@ -202,6 +206,12 @@ export default function GuessTheChord() {
   )
     ? settings.accidentalStyle
     : "sharp";
+  // Guards against a toneId saved before the Tone options here were narrowed to just Piano/Rhodes
+  // (e.g. still "triangle" from an earlier session) — falls back to the new default instead of
+  // silently keeping a tone that's no longer offered in the dropdown.
+  const toneId = EAR_TRAINING_TONES.some((t) => t.id === settings.toneId)
+    ? settings.toneId
+    : DEFAULT_EAR_TRAINING_TONE_ID;
   const roundCount = Math.min(
     MAX_ROUND_COUNT,
     Math.max(MIN_ROUND_COUNT, Math.round(rawRoundCount)),
@@ -380,7 +390,7 @@ export default function GuessTheChord() {
         );
       });
     } else {
-      notes.forEach((n) => playNote(n, CHORD_NOTE_DURATION_SECONDS, toneIdRef.current));
+      void playNotesTogether(notes, CHORD_NOTE_DURATION_SECONDS, toneIdRef.current);
     }
   }
 
@@ -1022,7 +1032,7 @@ export default function GuessTheChord() {
               <Select
                 value={toneId}
                 onChange={setToneId}
-                options={TONES.map((tone) => ({
+                options={EAR_TRAINING_TONES.map((tone) => ({
                   value: tone.id,
                   label: tone.label,
                 }))}

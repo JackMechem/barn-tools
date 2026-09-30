@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useState } from "react";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import StandardsPicker from "@/components/StandardsPicker";
@@ -9,7 +9,7 @@ import TunesManager from "@/components/TunesManager";
 import TuneEditorModal from "@/components/TuneEditorModal";
 import { ChecklistIcon, ListIcon, PencilIcon, PlusIcon, TrashIcon } from "@/components/tools";
 import { csvToTunes, downloadTunesCsv } from "@/lib/csv";
-import { getServerSnapshot, getSnapshot, setTunes, subscribe } from "@/lib/tunesStore";
+import { useSyncedTunes } from "@/lib/useSyncedTunes";
 import { DEFAULT_TIME_SIGNATURE, Tune, makeId } from "@/lib/types";
 
 function blankTune(name = ""): Tune {
@@ -37,7 +37,7 @@ export default function TunesPanel({
   pickFromStandards: boolean;
   onPickFromStandardsChange: (value: boolean) => void;
 }) {
-  const tunes = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const [tunes, setTunes] = useSyncedTunes();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
   const [editing, setEditing] = useState<Editing | null>(null);

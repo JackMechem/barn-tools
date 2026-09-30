@@ -20,7 +20,7 @@ import {
 import { midiToNote, parseNote } from "@/lib/noteRange";
 import { startTone, ToneHandle } from "@/lib/toneGenerator";
 import { TUNER_INSTRUMENTS, getInstrument, getTuning } from "@/lib/tunings";
-import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 
 const PANEL_IDS = ["tuner-instrument", "tuner-input", "tuner-tone"];
@@ -71,7 +71,7 @@ function sliderStyle(value: number, min: number, max: number) {
 }
 
 export default function Tuner() {
-  const [settings, updateSettings] = usePersistedSettings(SETTINGS_KEY, DEFAULT_SETTINGS);
+  const [settings, updateSettings] = useSyncedSettings(SETTINGS_KEY, DEFAULT_SETTINGS);
   const instrument = getInstrument(settings.instrumentId);
   const tuning = getTuning(instrument, settings.tuningId);
   const refA = Math.min(MAX_REF, Math.max(MIN_REF, settings.refA));

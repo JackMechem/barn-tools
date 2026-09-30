@@ -13,6 +13,8 @@ import type * as account from "../account.js";
 import type * as auth from "../auth.js";
 import type * as http from "../http.js";
 import type * as lib_resend from "../lib/resend.js";
+import type * as practiceSessions from "../practiceSessions.js";
+import type * as syncedSettings from "../syncedSettings.js";
 import type * as users from "../users.js";
 
 import type {
@@ -27,6 +29,8 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   http: typeof http;
   "lib/resend": typeof lib_resend;
+  practiceSessions: typeof practiceSessions;
+  syncedSettings: typeof syncedSettings;
   users: typeof users;
 }>;
 

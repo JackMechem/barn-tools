@@ -32,9 +32,14 @@ import {
   pitchClassOf,
   randomIntervalRound,
 } from "@/lib/intervals";
-import { usePersistedSettings } from "@/lib/usePersistedSettings";
+import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
-import { DEFAULT_TONE_ID, TONES, playNote } from "@/lib/tones";
+import {
+  DEFAULT_EAR_TRAINING_TONE_ID,
+  EAR_TRAINING_TONES,
+  playNote,
+  playNotesTogether,
+} from "@/lib/tones";
 import {
   ACCIDENTAL_STYLES,
   AccidentalStyle,
@@ -136,7 +141,7 @@ const DEFAULT_SETTINGS = {
   includeDescending: false,
   intervalIds: DEFAULT_ENABLED_INTERVAL_IDS as string[],
   intervalStats: {} as Record<string, GradeCounts>,
-  toneId: DEFAULT_TONE_ID,
+  toneId: DEFAULT_EAR_TRAINING_TONE_ID,
   playbackStyle: "melodic" as PlaybackStyle,
   revealNotes: true,
   accidentalStyle: "sharp" as AccidentalStyle,
@@ -144,7 +149,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function GuessTheInterval() {
-  const [settings, updateSettings] = usePersistedSettings(
+  const [settings, updateSettings] = useSyncedSettings(
     SETTINGS_KEY,
     DEFAULT_SETTINGS,
   );
@@ -156,7 +161,6 @@ export default function GuessTheInterval() {
     drillMode,
     includeDescending,
     roundCount: rawRoundCount,
-    toneId,
     playbackStyle,
     revealNotes,
   } = settings;
@@ -169,6 +173,12 @@ export default function GuessTheInterval() {
   )
     ? settings.accidentalStyle
     : "sharp";
+  // Guards against a toneId saved before the Tone options here were narrowed to just Piano/Rhodes
+  // (e.g. still "triangle" from an earlier session) — falls back to the new default instead of
+  // silently keeping a tone that's no longer offered in the dropdown.
+  const toneId = EAR_TRAINING_TONES.some((t) => t.id === settings.toneId)
+    ? settings.toneId
+    : DEFAULT_EAR_TRAINING_TONE_ID;
   const roundCount = Math.min(
     MAX_ROUND_COUNT,
     Math.max(MIN_ROUND_COUNT, Math.round(rawRoundCount)),
@@ -328,7 +338,7 @@ export default function GuessTheInterval() {
   function playIntervalSound(notes: string[]) {
     clearPlayback();
     if (playbackStyleRef.current === "harmonic") {
-      notes.forEach((n) => playNote(n, HARMONIC_NOTE_DURATION_SECONDS, toneIdRef.current));
+      void playNotesTogether(notes, HARMONIC_NOTE_DURATION_SECONDS, toneIdRef.current);
     } else {
       notes.forEach((n, i) => {
         playbackTimeouts.current.push(
@@ -934,7 +944,7 @@ export default function GuessTheInterval() {
               <Select
                 value={toneId}
                 onChange={setToneId}
-                options={TONES.map((tone) => ({
+                options={EAR_TRAINING_TONES.map((tone) => ({
                   value: tone.id,
                   label: tone.label,
                 }))}

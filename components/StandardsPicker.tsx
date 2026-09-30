@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon, PlusIcon, SearchIcon } from "@/components/tools";
 import { STANDARDS, Standard, nameId, searchStandards, standardToTune } from "@/lib/standards";
-import { getServerSnapshot, getSnapshot, setTunes, subscribe } from "@/lib/tunesStore";
+import { useSyncedTunes } from "@/lib/useSyncedTunes";
 
 const MAX_ROWS = 60;
 
@@ -14,7 +14,7 @@ export default function StandardsPicker({
   onClose: () => void;
   onCreateCustom: (name: string) => void;
 }) {
-  const tunes = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const [tunes, setTunes] = useSyncedTunes();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
