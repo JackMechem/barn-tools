@@ -232,6 +232,19 @@ export const performDelete = internalMutation({
       .collect();
     for (const row of followers) await ctx.db.delete(row._id);
 
+    // Same reasoning: a Community chord-chart or tune-list post is public-facing content, not
+    // private synced tool data, so neither should outlive the account that posted it.
+    const chartPosts = await ctx.db
+      .query("communityChordCharts")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    for (const row of chartPosts) await ctx.db.delete(row._id);
+    const tunePosts = await ctx.db
+      .query("communityTunes")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    for (const row of tunePosts) await ctx.db.delete(row._id);
+
     await ctx.db.delete(userId);
   },
 });

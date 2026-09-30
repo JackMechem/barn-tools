@@ -110,4 +110,48 @@ export default defineSchema({
     .index("by_follower", ["followerId"])
     .index("by_following", ["followingId"])
     .index("by_pair", ["followerId", "followingId"]),
+
+  /** A chord chart, or a whole chord-chart playlist, posted to the Community page for any
+      signed-in account to browse and import — this app's first user-generated content beyond a
+      profile itself. `songs` is a *snapshot* taken at post time (the same `IRealSong[]` shape
+      `lib/iRealPro.ts` produces and `ChordCharts.tsx`'s own library stores), not a live reference
+      to the poster's library — editing or clearing your own library afterward doesn't change or
+      break what you already posted, same reasoning as a public profile's tune-copy being a
+      snapshot (`lib/profileTunes.ts`). Stored as `v.any()` rather than a hand-typed validator
+      matching `IRealSong`/`Bar`'s full discriminated-union shape (chord slots, repeat bars,
+      endings, directives, ...) — the same "opaque JSON blob" call already made for
+      `syncedSettings` above, for the same reason: a change to that shape shouldn't also need a
+      matching schema migration here. Posting requires the caller's *own* profile to be
+      `isPublic` (checked in `convex/communityChordCharts.ts`'s `create`, not enforced by the
+      schema) — browsing/importing only requires being signed in, not a public profile of your
+      own. A post is filtered out of every read once its author's profile isn't (or is no longer)
+      public, mirroring every other privacy rule in this app. */
+  communityChordCharts: defineTable({
+    userId: v.id("users"),
+    title: v.string(),
+    description: v.string(),
+    songs: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_createdAt", ["createdAt"]),
+
+  /** The tune-list analog of `communityChordCharts` above — one post per row, `tunes` a snapshot
+      of `PublicTune[]` (`lib/profileTunes.ts` — name/tempos/keys/time signature, never `notes`)
+      taken from the poster's own Tunes list at post time, not a live reference to it. Same
+      `v.any()` call as `communityChordCharts.songs` and the same reasoning: `PublicTune[]` is
+      already a stable, hand-typed shape, but storing it as an opaque blob still means a future
+      field added to it doesn't also need a schema migration here. Same posting/browsing rules too
+      (`convex/communityTunes.ts`): posting needs the caller's own profile to be `isPublic`,
+      browsing just needs to be signed in, and a post is dropped from every read once its author's
+      profile isn't (or is no longer) public. */
+  communityTunes: defineTable({
+    userId: v.id("users"),
+    title: v.string(),
+    description: v.string(),
+    tunes: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_createdAt", ["createdAt"]),
 });

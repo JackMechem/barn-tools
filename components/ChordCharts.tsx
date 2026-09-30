@@ -14,27 +14,20 @@ import {
   SlidersIcon,
   TrashIcon,
 } from "@/components/tools";
+import { formatComposer, parseIrealPlaylist } from "@/lib/iRealPro";
 import {
-  formatComposer,
-  parseIrealPlaylist,
-  type IRealSong,
-} from "@/lib/iRealPro";
+  LIBRARY_DEFAULTS,
+  LIBRARY_KEY,
+  mergeSongs,
+  type StoredSong,
+} from "@/lib/chordChartsLibrary";
 import { usePersistedSettings } from "@/lib/usePersistedSettings";
 import { useSyncedSettings } from "@/lib/useSyncedSettings";
-
-type StoredSong = IRealSong & { id: string };
-
-const LIBRARY_KEY = "jam-practice-chord-charts-library";
-const LIBRARY_DEFAULTS: { songs: StoredSong[] } = { songs: [] };
 
 const VIEW_KEY = "jam-practice-chord-charts-view";
 const VIEW_DEFAULTS = { selectedId: "", barsPerRow: 4 };
 
 const BARS_PER_ROW_OPTIONS = [2, 3, 4, 6, 8];
-
-function songKey(song: IRealSong) {
-  return `${song.title.toLowerCase()}__${song.composer.toLowerCase()}__${song.key.toLowerCase()}`;
-}
 
 export default function ChordCharts() {
   // Imported songs are this tool's real data, so they sync to the account when signed in
@@ -74,26 +67,12 @@ export default function ChordCharts() {
       });
       return;
     }
-    const existingKeys = new Set(songs.map(songKey));
-    const additions: StoredSong[] = [];
-    for (const song of playlist.songs) {
-      const key = songKey(song);
-      if (existingKeys.has(key)) continue;
-      existingKeys.add(key);
-      additions.push({
-        ...song,
-        id:
-          typeof crypto !== "undefined" && crypto.randomUUID
-            ? crypto.randomUUID()
-            : key,
-      });
-    }
-    updateLibrary({ songs: [...songs, ...additions] });
-    const skipped = playlist.songs.length - additions.length;
+    const { songs: merged, added, skipped } = mergeSongs(songs, playlist.songs);
+    updateLibrary({ songs: merged });
     setStatus({
       kind: "ok",
       message:
-        `Imported ${additions.length} song${additions.length === 1 ? "" : "s"} from "${playlist.name}".` +
+        `Imported ${added} song${added === 1 ? "" : "s"} from "${playlist.name}".` +
         (skipped > 0 ? ` (${skipped} already in your library.)` : ""),
     });
     setLinkText("");

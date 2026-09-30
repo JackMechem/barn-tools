@@ -1,4 +1,4 @@
-import { Key, Tempo } from "./types";
+import { Key, Tempo, Tune } from "./types";
 
 export type PublicTune = {
   id: string;
@@ -7,6 +7,20 @@ export type PublicTune = {
   keys: Key[];
   timeSignature: string;
 };
+
+/** Strips a tune down to the same shape a public profile (or a Community tune post — see
+    `convex/communityTunes.ts`) exposes: name, tempos, keys, time signature. Never `notes`, which
+    could hold private practice notes — the same rule `getPublicByUsername` applies when resolving
+    an owner's tune lists live, just run here at the moment of posting instead. */
+export function toPublicTune(tune: Tune): PublicTune {
+  return {
+    id: tune.id,
+    name: tune.name,
+    tempos: tune.tempos,
+    keys: tune.keys,
+    timeSignature: tune.timeSignature,
+  };
+}
 
 function isTempo(value: unknown): value is Tempo {
   return (

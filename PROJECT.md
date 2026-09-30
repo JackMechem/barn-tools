@@ -367,26 +367,95 @@ what exists, what's next, and the honest state of what's been verified.
   `components/tools.tsx`'s `NAV_LINKS`.
 - **Community** (`components/Community.tsx`, `app/community/page.tsx`) — this app's first public,
   social feature; a new `"Community"` `NAV_LINKS` category on its own, reachable (like every other
-  page here) without an account. Has its own left sidebar — Search / Following — using the exact
-  same `SidebarNavButton` (`components/SidebarNavButton.tsx`, pulled out of `/account`'s own
-  sidebar into a shared component) `/account` itself uses, per a direct request to give this page
-  "the same sidebar thing." **Search** is a username-only search box (not instrument/tune — an
-  explicit scoping call) over every `isPublic` profile, via `convex/profiles.ts`'s `search` — a
-  plain scan-and-filter over public profiles rather than a real search index, since this is a small
-  personal-project directory, not a large-scale service. **Following** reuses `FollowLists`
-  wholesale (the same component `/account`'s own Following tab renders — both who you follow and
-  who follows you), per a direct follow-up request for "a section for people you follow" here too,
-  not just on the account page. Since this page (unlike `/account`) is reachable signed out,
-  `Community` gates that view itself — `useConvexAuth()`'s `isLoading`/`isAuthenticated` picks
-  between a loading spinner, `FollowLists`, or a "sign in to see who you follow" prompt — rather
-  than mounting `FollowLists` unconditionally: that component's own `useQuery(api.users.current)`
-  gate only checks for "still loading" (`user === undefined`), not "definitely signed out"
-  (`user === null`), so mounting it while signed out would leave its lists stuck spinning forever;
-  `/account` never hit this because that whole page is already gated behind being signed in before
-  any tab, including Following, ever renders. See "Public profiles & follows" under Backend
-  (Convex) below for the whole feature — the public profile page itself
-  (`app/u/[username]/page.tsx`) isn't a "tool" with a nav entry of its own, just what a Community
-  search result (or a shared link) leads to.
+  page here) without an account. Has its own left sidebar — Search / Following / Chord Charts —
+  using the exact same `SidebarNavButton` (`components/SidebarNavButton.tsx`, pulled out of
+  `/account`'s own sidebar into a shared component) `/account` itself uses, per a direct request to
+  give this page "the same sidebar thing." **Search** is a username-only search box (not
+  instrument/tune — an explicit scoping call) over every `isPublic` profile, via
+  `convex/profiles.ts`'s `search` — a plain scan-and-filter over public profiles rather than a real
+  search index, since this is a small personal-project directory, not a large-scale service.
+  **Following** reuses `FollowLists` wholesale (the same component `/account`'s own Following tab
+  renders — both who you follow and who follows you), per a direct follow-up request for "a
+  section for people you follow" here too, not just on the account page. **Chord Charts**
+  (`components/CommunityChordCharts.tsx`) is this app's first user-generated content — see its own
+  paragraph below. Since this page (unlike `/account`) is reachable signed out, `Community` gates
+  the Following and Chord Charts views itself — `useConvexAuth()`'s `isLoading`/`isAuthenticated`
+  picks between a loading spinner, the real content, or a sign-in prompt — rather than mounting
+  either unconditionally: `FollowLists`' own `useQuery(api.users.current)` gate only checks for
+  "still loading" (`user === undefined`), not "definitely signed out" (`user === null`), so
+  mounting it while signed out would leave its lists stuck spinning forever, and
+  `CommunityChordCharts` is deliberately signed-in-only per Jack's own scoping call (browsing needs
+  an account, even though search doesn't); `/account` never hits either problem because that whole
+  page is already gated behind being signed in before any tab ever renders. See "Public profiles &
+  follows" under Backend (Convex) below for the follow/profile feature, and "Community chord
+  charts"/"Community tunes" further down for the two posting sections — the public profile page
+  itself (`app/u/[username]/page.tsx`) isn't a "tool" with a nav entry of its own, just what a
+  Community search result (or a shared link) leads to.
+- **Community chord charts** (`components/CommunityChordCharts.tsx`, `convex/communityChordCharts.ts`)
+  — the Community page's third section: browse chord charts and playlists other users have posted,
+  and import any of them straight into your own Chord Charts library. A dedicated table
+  (`communityChordCharts` in `convex/schema.ts`), not the generic `syncedSettings` blob mechanism —
+  unlike every tool's own settings/data, this has to be *readable by other users*, which
+  `syncedSettings` (deliberately self-scoped to the caller via `getAuthUserId(ctx)`) doesn't
+  support, so it gets a real table the same way `profiles`/`follows` did. A post's `songs` is a
+  **snapshot** taken at post time (the poster's own already-imported `IRealSong[]`, straight out of
+  `lib/chordChartsLibrary.ts` — the same synced blob `ChordCharts.tsx` itself reads/writes, pulled
+  into its own file so both components share one `LIBRARY_KEY`/`songKey`/`mergeSongs` instead of a
+  second copy that could drift), not a live reference to the poster's library — editing or clearing
+  your own library afterward doesn't change or break what you already posted, same "copy is a
+  snapshot" reasoning as a public profile's tune-copy (`lib/profileTunes.ts`). `songs` is stored as
+  `v.any()` rather than a hand-typed Convex validator matching `IRealSong`/`Bar`'s full
+  discriminated-union shape — the same opaque-JSON-blob call already made for `syncedSettings`,
+  for the same reason: a future change to that shape shouldn't also need a matching schema
+  migration here. **Posting requires the caller's own profile to be `isPublic`** (checked
+  server-side in `create`, the real source of truth — the UI mirrors it by showing a "make your
+  profile public" prompt instead of a Post button when it isn't, rather than only disabling
+  something and leaving the reason to a failed mutation) — **browsing only requires being signed
+  in**, not a public profile of your own, per Jack's explicit split between the two. Every read
+  (`list`/`get`) drops a post whose author's profile isn't (or is no longer) public, the same
+  privacy rule applied everywhere else cross-user data is read in this app — a post doesn't
+  outlive its author's decision to go private, and `convex/account.ts`'s `performDelete` cascades
+  here too, same as it does for `profiles`/`follows`, so deleting your account doesn't leave posts
+  behind with no reachable author. The browse list (`list`) is metadata-only (title, description,
+  song count, the author's *current* username/avatar) — a post's full chart data (`get`) is only
+  fetched once a post is actually opened (`PostDetailModal`, mounted only while a post id is
+  selected, the same conditional-query-on-`"skip"`-equivalent lazy-load pattern used elsewhere in
+  this app), so scrolling the browse list doesn't pull down every posted playlist's full bar data
+  up front. Posting (`CreatePostModal`) doesn't accept a pasted iReal link directly — it picks one
+  or more songs out of the caller's *own* Chord Charts library (a checkbox list, searchable), so
+  "post a chart" and "make a playlist" are the same action just with a different number of items
+  checked, and there's exactly one place (the Chord Charts tool itself) that ever parses iReal
+  links. Viewing a post lets each song be expanded inline into the real `ChordChart` renderer
+  (the same component/`container-type: inline-size` wrapper `ChordCharts.tsx` itself uses) before
+  deciding to import it, plus an "Import all" shortcut for the whole post — both routes go through
+  `mergeSongs` (`lib/chordChartsLibrary.ts`), the exact same title/composer/key dedupe
+  `ChordCharts.tsx`'s own playlist import has always used, so importing a chart you already have
+  (from Community or anywhere else) is always a safe no-op rather than a duplicate. Capped at 100
+  songs per post server-side (`MAX_SONGS_PER_POST`) as a sanity limit, not a measured one — real
+  playlists people would actually post (a gig setlist, a book's worth of standards) are well under
+  it.
+- **Community tunes** (`components/CommunityTunes.tsx`, `convex/communityTunes.ts`) — the Community
+  page's fourth section, added right after Chord Charts per a direct follow-up ("there should be
+  another section for posting tunes") and built as its sibling in every way: same shape, same
+  posting-needs-a-public-profile/browsing-just-needs-an-account split, same metadata-only `list` +
+  lazy-loaded-on-open `get`, same account-deletion cascade, same `v.any()`-blob-in-a-dedicated-table
+  call (`communityTunes` in `convex/schema.ts`) for the identical "needs to be readable by other
+  users, so `syncedSettings` alone can't cover it" reason. A post's `tunes` is a snapshot of
+  `PublicTune[]` (`lib/profileTunes.ts` — name/tempos/keys/time signature) taken from the poster's
+  own Tunes list (`useSyncedTunes()`) at post time via the new `toPublicTune` export, never
+  `notes` — the exact same privacy rule `getPublicByUsername` already applies when a profile's own
+  Tunes section resolves live, just run once at posting time instead. `CreatePostModal` here is
+  the tune-shaped twin of the chord-charts one: a searchable checkbox list of the caller's own
+  tunes instead of their own chord charts, same "post a tune" and "make a tune list" being the same
+  action with a different number of boxes checked. The one real difference from Chord Charts:
+  viewing a post (`PostDetailModal`) doesn't need its own bespoke row/import UI at all — it hands
+  `post.tunes` straight to `PublicTuneList`, the *exact* component a public profile's own Tunes
+  section already renders with (name, tempo/key chips, and the "Add"/"Learn" buttons that copy a
+  tune into the viewer's own Tunes or Tunes to Learn list with the same name-based dedupe check),
+  so browsing a Community tune post and browsing someone's profile page behave identically with no
+  second copy of that logic to maintain. Capped at 300 tunes per post (`MAX_TUNES_PER_POST`) —
+  higher than Chord Charts' 100, since a tune here is a few small fields, not a full parsed bar
+  list, so many more of them fit comfortably under the same practical per-document-size concern.
 - **Home** (`app/page.tsx` / `components/Home.tsx`) — an actual landing page, not a tool directory.
   Went through two very different designs this session: the first rendered every `NAV_LINKS` entry
   as an icon-card grid, grouped by category via the sidebar/command palette's own `groupByCategory`
@@ -1113,6 +1182,35 @@ from something that used to work:
   without failing the whole list) against synthetic Node scripts, and that the whole feature —
   schema, every new Convex function, every new page — type-checks and deploys cleanly to the dev
   backend.
+- **Community chord charts** (see its own paragraph under Backend (Convex) above): also entirely
+  unclicked — this sandbox can't create two signed-in sessions to post from one account and browse/
+  import from another. Specifically unverified: that `create` actually refuses posting for a
+  non-public profile and the client-side prompt matches; that `list`/`get` really do drop a post
+  once its author's profile goes private (not just that the query code reads that way); that
+  `CreatePostModal`'s checkbox picker actually produces a correct snapshot (no silent field loss
+  converting a library `StoredSong` down to a plain `IRealSong`); that the inline `ChordChart`
+  preview inside `PostDetailModal` renders correctly in that narrower modal context (same component
+  as the tool page, but a different container width/`container-type` context it's never been
+  rendered inside before); that "Import all" and a per-song "Import" actually land in
+  `ChordCharts.tsx`'s own library and show up there immediately (same `syncedSettings` key, but
+  never watched live across two mounted components in a real browser); and the account-deletion
+  cascade now also clearing `communityChordCharts` rows. Verified so far, purely at the level of
+  `tsc`/`eslint`/`next build` passing and `npx convex dev --once` deploying the new
+  `communityChordCharts` table and functions cleanly to the dev backend — no synthetic script was
+  run against this one specifically (unlike `resolvePublicTunes`/`username.ts` above), since its
+  logic is thin enough (mostly Convex reads/writes plus the already-tested `mergeSongs`) that there
+  wasn't a clear gap a Node script would catch that type-checking wouldn't.
+- **Community tunes** (see its own paragraph under Backend (Convex) above): same story, also
+  entirely unclicked. Specifically unverified, beyond everything already listed for Community
+  chord charts (the same posting-gate/privacy-filter/account-deletion-cascade concerns apply here
+  identically): that `PublicTuneList` — a component only ever previously mounted from a public
+  profile page — renders and behaves the same way reused here inside `PostDetailModal` (correct
+  dedupe against the viewer's own Tunes/Tunes to Learn, correct fresh-id copy on Add/Learn, no
+  layout surprises in a modal instead of a full page); and that `toPublicTune` actually strips
+  `notes` in practice, not just by reading the function. Verified so far at the same level as
+  Community chord charts: `tsc`/`eslint`/`next build` pass and `npx convex dev --once` deploys the
+  new `communityTunes` table and functions cleanly — no dedicated synthetic script, for the same
+  "thin glue over already-tested pieces" reasoning.
 - Recorder: multitrack recording/overdub, the auto-latency burst-tone alignment, "align to beat",
   moving clips between tracks, WAV export/mixdown.
 - Note Trainer listen mode: live pitch grading accuracy, the "ignore a held-over note" fix, the
