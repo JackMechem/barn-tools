@@ -25,14 +25,28 @@ export type EngineState = {
   remainingMsAtPause: number | null;
   soundEnabled: boolean;
   toneId: string;
+  /** Instead of silently auto-advancing when a step's time runs out, hold on `alarming: true`
+      (below) and keep repeating the chime until `skip()`/`stop()` is explicitly called. */
+  alarmMode: boolean;
+  /** Only meaningful while `alarmMode` is also on — also shows a full-screen prompt
+      (`components/PracticeTimerAlert.tsx`) while `alarming`, not just the repeating sound. */
+  fullScreenAlert: boolean;
+  /** True once the current step's time has fully elapsed with `alarmMode` on, and the engine is
+      holding here — repeating the alarm sound (if `soundEnabled`) and waiting for `skip()`
+      (dismiss and move on) or `stop()` — instead of having already auto-advanced. While true,
+      `current`/`startedAt`/`durationMs` still describe the step that just ended (there's nothing
+      newly counting down), and `pause()`/`resume()` don't apply — there's nothing to pause. */
+  alarming: boolean;
 };
 
 const STORAGE_KEY = "jam-practice-timer-running";
+const ALARM_REPEAT_MS = 1500;
 
 let state: EngineState | null = null;
 let initialized = false;
 const listeners = new Set<() => void>();
 let timeoutId: ReturnType<typeof setTimeout> | null = null;
+let alarmIntervalId: ReturnType<typeof setInterval> | null = null;
 
 function notify() {
   for (const listener of listeners) listener();
@@ -66,6 +80,22 @@ function playTransitionChime(toneId: string) {
   setTimeout(() => playNote("G5", 0.4, toneId), 150);
 }
 
+function stopAlarmSound() {
+  if (alarmIntervalId !== null) {
+    clearInterval(alarmIntervalId);
+    alarmIntervalId = null;
+  }
+}
+
+/** Starts (or restarts) the repeating alarm chime — the same two-note transition chime, just
+    played again every `ALARM_REPEAT_MS` until `stopAlarmSound()` is called (`skip()`/`stop()`, or
+    the run ending naturally). */
+function startAlarmSound(toneId: string) {
+  stopAlarmSound();
+  playTransitionChime(toneId);
+  alarmIntervalId = setInterval(() => playTransitionChime(toneId), ALARM_REPEAT_MS);
+}
+
 /** Loads the step at `index` as the new current step, or ends the run if the session is over.
     `chime` is false only for the one internal case (restoring after time fully elapsed while the
     tab was closed) where playing a sound the instant a page loads would be surprising — and
@@ -75,8 +105,11 @@ function loadStep(
   index: number,
   soundEnabled: boolean,
   toneId: string,
+  alarmMode: boolean,
+  fullScreenAlert: boolean,
   chime: boolean,
 ) {
+  stopAlarmSound();
   const current = stepAt(session, index);
   if (!current) {
     stop();
@@ -95,6 +128,9 @@ function loadStep(
     remainingMsAtPause: null,
     soundEnabled,
     toneId,
+    alarmMode,
+    fullScreenAlert,
+    alarming: false,
   };
   notify();
   persist();
@@ -102,9 +138,31 @@ function loadStep(
   if (soundEnabled && chime) playTransitionChime(toneId);
 }
 
+/** Enters the "time's up, waiting on you" state instead of loading the next step — what a normal
+    `advance()` does instead of auto-advancing when `alarmMode` is on. */
+function enterAlarm() {
+  if (!state) return;
+  state = { ...state, alarming: true };
+  notify();
+  persist();
+  if (state.soundEnabled) startAlarmSound(state.toneId);
+}
+
 function advance() {
   if (!state) return;
-  loadStep(state.session, state.index + 1, state.soundEnabled, state.toneId, true);
+  if (state.alarmMode) {
+    enterAlarm();
+    return;
+  }
+  loadStep(
+    state.session,
+    state.index + 1,
+    state.soundEnabled,
+    state.toneId,
+    state.alarmMode,
+    state.fullScreenAlert,
+    true,
+  );
 }
 
 function ensureInitialized() {
@@ -123,11 +181,27 @@ function ensureInitialized() {
     }
     const remaining = saved.durationMs - (Date.now() - saved.startedAt);
     if (remaining <= 0) {
-      // Enough real time passed while the tab was closed that this step is already over — move
-      // on to the next one, starting fresh, rather than trying to simulate every step that might
-      // have silently elapsed in between (could be a lot, for a long-closed tab and a short
-      // segment) or a chime firing the instant the page loads.
-      loadStep(saved.session, saved.index + 1, saved.soundEnabled, saved.toneId, false);
+      if (saved.alarmMode) {
+        // Was already alarming, or its time ran out while the tab was closed — either way, hold
+        // here on this same step rather than silently moving past it; that's the whole point of
+        // alarm mode. No sound on restore, same autoplay-would-likely-be-blocked reasoning as the
+        // non-alarm-mode branch below.
+        state = { ...saved, current, next: stepAt(saved.session, saved.index + 1), alarming: true };
+      } else {
+        // Enough real time passed while the tab was closed that this step is already over — move
+        // on to the next one, starting fresh, rather than trying to simulate every step that
+        // might have silently elapsed in between (could be a lot, for a long-closed tab and a
+        // short segment) or a chime firing the instant the page loads.
+        loadStep(
+          saved.session,
+          saved.index + 1,
+          saved.soundEnabled,
+          saved.toneId,
+          saved.alarmMode,
+          saved.fullScreenAlert,
+          false,
+        );
+      }
     } else {
       state = { ...saved, current, next: stepAt(saved.session, saved.index + 1) };
       scheduleAdvance(remaining);
@@ -154,13 +228,19 @@ export function getServerSnapshot(): EngineState | null {
 
 /** Starts a fresh run of `session` from its first step. Silently does nothing for a session with
     no steps at all (an empty custom segment list) — nothing meaningful to run. */
-export function start(session: PracticeSession, soundEnabled: boolean, toneId: string) {
+export function start(
+  session: PracticeSession,
+  soundEnabled: boolean,
+  toneId: string,
+  alarmMode: boolean,
+  fullScreenAlert: boolean,
+) {
   clearScheduled();
-  loadStep(session, 0, soundEnabled, toneId, true);
+  loadStep(session, 0, soundEnabled, toneId, alarmMode, fullScreenAlert, true);
 }
 
 export function pause() {
-  if (!state || state.paused) return;
+  if (!state || state.paused || state.alarming) return;
   const remaining = state.durationMs - (Date.now() - state.startedAt);
   clearScheduled();
   state = { ...state, paused: true, remainingMsAtPause: Math.max(0, remaining) };
@@ -184,15 +264,26 @@ export function resume() {
   scheduleAdvance(remaining);
 }
 
-/** Skips straight to the next step, same as if the current one's time had just run out. */
+/** Skips straight to the next step — same as if the current one's time had just run out (with
+    `alarmMode` off), or dismisses an active alarm and moves on (with it on). Either way, silences
+    any repeating alarm sound first. */
 export function skip() {
   if (!state) return;
-  loadStep(state.session, state.index + 1, state.soundEnabled, state.toneId, true);
+  loadStep(
+    state.session,
+    state.index + 1,
+    state.soundEnabled,
+    state.toneId,
+    state.alarmMode,
+    state.fullScreenAlert,
+    true,
+  );
 }
 
 /** Ends the run entirely. */
 export function stop() {
   clearScheduled();
+  stopAlarmSound();
   state = null;
   notify();
   persist();

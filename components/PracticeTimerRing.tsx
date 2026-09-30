@@ -22,11 +22,17 @@ export default function PracticeTimerRing({
   durationMs,
   paused,
   remainingMsAtPause,
+  alarming,
 }: {
   startedAt: number;
   durationMs: number;
   paused: boolean;
   remainingMsAtPause: number | null;
+  /** The step's time is fully up and `alarmMode` is holding here instead of having auto-advanced
+      (`lib/practiceTimerEngine.ts`) — paints the ring fully drained (there's nothing left to count
+      down) and pulses it in the danger color instead of ticking, the same "something needs your
+      attention" treatment as the rest of the alarm UI. */
+  alarming?: boolean;
 }) {
   const circleRef = useRef<SVGCircleElement>(null);
   const labelRef = useRef<HTMLSpanElement>(null);
@@ -41,6 +47,10 @@ export default function PracticeTimerRing({
       if (labelRef.current) labelRef.current.textContent = formatClock(remainingMs);
     }
 
+    if (alarming) {
+      paint(0);
+      return;
+    }
     if (paused) {
       paint(remainingMsAtPause ?? 0);
       return;
@@ -52,14 +62,14 @@ export default function PracticeTimerRing({
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [startedAt, durationMs, paused, remainingMsAtPause]);
+  }, [startedAt, durationMs, paused, remainingMsAtPause, alarming]);
 
   return (
     <div className="relative flex h-48 w-48 items-center justify-center">
       <svg
         aria-hidden
         viewBox="0 0 100 100"
-        className="pointer-events-none absolute inset-0 h-full w-full -rotate-90"
+        className={`pointer-events-none absolute inset-0 h-full w-full -rotate-90 ${alarming ? "animate-pulse" : ""}`}
       >
         <circle
           cx="50"
@@ -77,7 +87,7 @@ export default function PracticeTimerRing({
           fill="none"
           strokeWidth="4"
           strokeLinecap="round"
-          className="stroke-accent"
+          className={alarming ? "stroke-danger" : "stroke-accent"}
           style={{
             strokeDasharray: RING_CIRCUMFERENCE,
             strokeDashoffset: 0,
@@ -85,7 +95,10 @@ export default function PracticeTimerRing({
           }}
         />
       </svg>
-      <span ref={labelRef} className="text-4xl font-bold tabular-nums" />
+      <span
+        ref={labelRef}
+        className={`text-4xl font-bold tabular-nums ${alarming ? "text-danger animate-pulse" : ""}`}
+      />
     </div>
   );
 }

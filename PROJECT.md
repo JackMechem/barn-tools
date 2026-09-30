@@ -289,13 +289,50 @@ what exists, what's next, and the honest state of what's been verified.
   duration label like "10 min", not a ticking countdown), so the tool page and the sidebar/mobile
   widget literally cannot show two different numbers for the same running step anymore, and a long
   segment reads as minutes:seconds instead of a raw, hard-to-parse second count. While paused, it
-  freezes at `remainingMsAtPause` instead of the live tick. `components/PracticeTimerWidget.tsx` is the
-  "what's running right now" glimpse shown outside the tool itself while a session is active — a
-  card in the desktop sidebar footer (both its full and collapsed widths, `components/Sidebar.tsx`)
-  or a fixed top-right badge on mobile mirroring the hamburger button's top-left placement
-  (`app/layout.tsx`) — every view just a link back to `/practice-timer`, no controls, so it stays a
-  glimpse rather than a second copy of the running-timer UI; renders nothing while nothing's
-  running. Saved sessions sync per Jack's explicit call on how sophisticated this should be: signed
+  freezes at `remainingMsAtPause` instead of the live tick. `components/PracticeTimerWidget.tsx` is
+  the "what's running right now" glimpse shown outside the tool itself while a session is active —
+  a card in the desktop sidebar footer (both its full and collapsed widths,
+  `components/Sidebar.tsx`), the same card again in the mobile menu's own footer (shares the same
+  code path as the desktop one), or a fixed top-right badge on mobile mirroring the hamburger
+  button's top-left placement (`app/layout.tsx`); renders nothing while nothing's running. The
+  full-width card (desktop sidebar and the mobile menu, not the collapsed sidebar or the top-right
+  badge — no room for controls in either of those) has its own pause/resume, skip, and stop
+  buttons, real `<button>`s as siblings of the card's own `<Link>` rather than nested inside it (a
+  button inside an anchor is invalid HTML and breaks click handling) — added per a direct follow-up
+  request to control a running session from the sidebar, not just glance at it.
+
+  **Alarm mode and full-screen alerts** (the `practice-timer-sound-settings` synced object's
+  `alarmMode`/`fullScreenAlert`, alongside the existing `soundEnabled`/`toneId`): by default, a
+  segment ending plays one transition chime and the engine auto-advances silently underneath,
+  unchanged from before. With alarm mode on, the engine instead holds — `EngineState.alarming:
+  true` — repeating that same chime every 1.5s (`lib/practiceTimerEngine.ts`'s
+  `startAlarmSound`/`ALARM_REPEAT_MS`) until `skip()` is called (dismiss and move on — the exact
+  same function as a normal manual skip) or `stop()` ends the run outright; `pause()`/`resume()`
+  are no-ops while alarming, since there's nothing actively counting down to pause. Every
+  Practice-Timer-aware surface reflects `alarming`: the tool page's own controls swap to
+  Continue/Stop (no Pause, no plain Skip) and `PracticeTimerRing` paints fully drained and pulses
+  in the danger color instead of ticking; the sidebar widget shows "Time's up!" with the same
+  Continue/Stop pair; and — only while `fullScreenAlert` is also on — `components/
+  PracticeTimerAlert.tsx`, mounted once in `app/layout.tsx` (so it interrupts you app-wide, not
+  just on the tool page), shows a full-screen takeover with the same Continue/Stop choice,
+  deliberately **not** dismissible via Escape or a backdrop click the way `ConfirmDialog` is — this
+  is meant to be genuinely sticky, like a real alarm clock, until an actual choice is made.
+  `fullScreenAlert` only does anything while `alarmMode` is also on (there's no "held, waiting"
+  moment to interrupt for otherwise — without alarm mode the engine has already silently advanced
+  by the time anything could show), so its own `SwitchRow` is disabled whenever `alarmMode` is off,
+  and turning `alarmMode` off forces it back off too rather than leaving it toggled-on-but-dormant.
+  Restoring from a reload (`ensureInitialized()`) treats "was already alarming" and "alarm-mode
+  time elapsed while the tab was closed" as the same case — both restore straight into
+  `alarming: true` on the *same* step, never silently advancing past it the way non-alarm-mode
+  restores do; no sound autoplay on that restore either, same reasoning as the existing
+  chime-after-restore skip (a browser would very likely block an unprompted autoplay with no user
+  gesture anyway). Verified with a synthetic script driving the engine's alarm state machine
+  directly (holds on `alarming` instead of auto-advancing, stays held indefinitely rather than only
+  once, `skip()` dismisses and advances, `stop()` ends cleanly from an alarming state, and
+  `alarmMode: false` is completely behaviorally unchanged) plus two new restore-from-storage cases
+  (elapsed-while-away-with-alarm-mode-on, and already-alarming) alongside the existing ones.
+
+  Saved sessions sync per Jack's explicit call on how sophisticated this should be: signed
   out, they live in `localStorage` via `lib/practiceSessionsStore.ts` (the same hand-rolled
   external-store shape as `lib/tunesStore.ts`); signed in, `lib/usePracticeSessions.ts` reads/
   writes the `practiceSessions` Convex table instead (`convex/practiceSessions.ts`) — **with no
@@ -932,7 +969,21 @@ from something that used to work:
   earlier `performance.timeOrigin`-converted one — see the tool's own bullet above — was Jack
   actually seeing the two disagree; this sandbox can't reproduce or re-check that by eye at all),
   and the transition chime (`playTransitionChime`, `lib/tones.ts`) are all unverified by ear/eye.
-  The signed-in-reads-
+  Same story for what's new since: alarm mode's repeating chime (whether the 1.5s repeat interval
+  actually sounds like a sane alarm cadence rather than too frantic or too slow — a number picked,
+  not measured against anything), the sidebar widget's new pause/resume/skip/stop buttons actually
+  working when clicked (siblings of the card's `<Link>`, not nested inside it, which fixes a real
+  invalid-HTML/broken-click-handling risk on paper, but hasn't been clicked for real), and
+  `PracticeTimerAlert`'s full-screen takeover — whether it actually renders above everything else
+  app-wide (untestable without a real multi-page browsing session to interrupt), whether its
+  `z-[200]` really does sit above every other overlay in the app (a number chosen by reading every
+  other `z-` value already in use and going higher, not verified by opening two at once), and
+  whether `autoFocus` on its Continue button actually lands keyboard focus there in every browser.
+  The state machine itself (holds on `alarming` instead of auto-advancing, stays held rather than
+  firing once, `skip()`/`stop()` both work from an alarming state, restoring into an
+  already-alarming or just-elapsed-into-alarming state on reload) is covered by synthetic tests —
+  see `lib/practiceTimerEngine.ts`'s own bullet above — but that's the logic, not the experience of
+  an actual alarm going off while you're doing something else on your phone. The signed-in-reads-
   Convex-only sync switch (`lib/usePracticeSessions.ts`) type-checks and the schema/functions
   deploy cleanly to the dev backend, but the actual cross-device behavior — including that signing
   in really does ignore whatever's in local storage rather than merging it — hasn't been clicked

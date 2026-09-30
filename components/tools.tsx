@@ -295,6 +295,15 @@ export function PauseIcon({ className }: { className?: string }) {
   );
 }
 
+export function SkipForwardIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)} fill="currentColor" stroke="none">
+      <path d="M6 5.5v13a1 1 0 001.5.86l9-6.5a1 1 0 000-1.72l-9-6.5A1 1 0 006 5.5z" />
+      <rect x="17" y="5" width="2.5" height="14" rx="1" />
+    </svg>
+  );
+}
+
 export function FlagIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>

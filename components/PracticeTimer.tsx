@@ -45,7 +45,12 @@ import { useSyncedSettings } from "@/lib/useSyncedSettings";
 
 const PANEL_IDS = ["practice-timer-editor", "practice-timer-sound"];
 const SOUND_SETTINGS_KEY = "practice-timer-sound-settings";
-const DEFAULT_SOUND_SETTINGS = { soundEnabled: true, toneId: DEFAULT_TONE_ID };
+const DEFAULT_SOUND_SETTINGS = {
+  soundEnabled: true,
+  toneId: DEFAULT_TONE_ID,
+  alarmMode: false,
+  fullScreenAlert: false,
+};
 const TONE_OPTIONS = TONES.map((t) => ({ value: t.id, label: t.label }));
 
 /** The session editor's own working copy — always keeps both `segments` and `pomodoro` around
@@ -87,13 +92,20 @@ export default function PracticeTimer() {
     SOUND_SETTINGS_KEY,
     DEFAULT_SOUND_SETTINGS,
   );
-  const { soundEnabled, toneId } = settings;
+  const { soundEnabled, toneId, alarmMode, fullScreenAlert } = settings;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   function startSession(session: PracticeSession) {
-    start(session, soundEnabled, toneId);
+    start(session, soundEnabled, toneId, alarmMode, fullScreenAlert);
   }
+
+  // Full-screen alert only means anything while alarm mode is also on (there's no "alarming, held
+  // and waiting" moment to interrupt for otherwise — a non-alarm-mode transition has already
+  // silently happened by the time anything could show) — turning alarm mode off turns this back
+  // off too, rather than leaving it toggled on but dormant.
+  const setAlarmMode = (alarmMode: boolean) =>
+    updateSoundSettings(alarmMode ? { alarmMode } : { alarmMode, fullScreenAlert: false });
 
   function updateDraft(patch: Partial<Draft>) {
     setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -465,14 +477,31 @@ export default function PracticeTimer() {
                 />
               </label>
             )}
+            <SwitchRow
+              label="Alarm mode"
+              checked={alarmMode}
+              onChange={setAlarmMode}
+              hint="Instead of moving on automatically, holds at the end of each segment and keeps beeping until you dismiss it — from here, the running timer's own controls, or the sidebar widget while it's running."
+            />
+            <SwitchRow
+              label="Full-screen alert"
+              checked={fullScreenAlert}
+              onChange={(fullScreenAlert) => updateSoundSettings({ fullScreenAlert })}
+              disabled={!alarmMode}
+              hint="Also shows a full-screen prompt when the alarm goes off, wherever you are in the app — not just a sound. Only applies while alarm mode is on."
+            />
           </CollapsiblePanel>
         </>
       }
     >
       {engineState ? (
         <div className="flex flex-col items-center gap-5">
-          <p className="text-sm font-medium uppercase tracking-widest text-muted">
-            {engineState.paused ? "Paused" : "Now running"}
+          <p
+            className={`text-sm font-medium uppercase tracking-widest ${
+              engineState.alarming ? "animate-pulse text-danger" : "text-muted"
+            }`}
+          >
+            {engineState.alarming ? "Time's up" : engineState.paused ? "Paused" : "Now running"}
           </p>
           <h2 className="break-words text-3xl font-bold sm:text-4xl">
             {engineState.current.title}
@@ -482,6 +511,7 @@ export default function PracticeTimer() {
             durationMs={engineState.durationMs}
             paused={engineState.paused}
             remainingMsAtPause={engineState.remainingMsAtPause}
+            alarming={engineState.alarming}
           />
           {engineState.next ? (
             <p className="text-sm text-muted">Next: {engineState.next.title}</p>
@@ -489,7 +519,15 @@ export default function PracticeTimer() {
             <p className="text-sm text-muted">Last step of this session.</p>
           )}
           <div className="flex flex-wrap items-center justify-center gap-3">
-            {engineState.paused ? (
+            {engineState.alarming ? (
+              <button
+                type="button"
+                onClick={skip}
+                className="flex items-center gap-1.5 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-accent-foreground hover:bg-accent-hover"
+              >
+                <PlayIcon className="h-4 w-4" /> Continue
+              </button>
+            ) : engineState.paused ? (
               <button
                 type="button"
                 onClick={resume}
@@ -506,13 +544,15 @@ export default function PracticeTimer() {
                 <PauseIcon className="h-4 w-4" /> Pause
               </button>
             )}
-            <button
-              type="button"
-              onClick={skip}
-              className="rounded-full bg-surface px-5 py-2.5 text-sm font-medium hover:bg-surface-hover"
-            >
-              Skip
-            </button>
+            {!engineState.alarming && (
+              <button
+                type="button"
+                onClick={skip}
+                className="rounded-full bg-surface px-5 py-2.5 text-sm font-medium hover:bg-surface-hover"
+              >
+                Skip
+              </button>
+            )}
             <button
               type="button"
               onClick={stop}
