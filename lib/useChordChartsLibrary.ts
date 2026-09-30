@@ -48,10 +48,18 @@ export function useChordChartsLibrary(selectedSongId: string | null) {
   const [localLibrary, updateLocalLibrary] = usePersistedSettings(LIBRARY_KEY, LIBRARY_DEFAULTS);
 
   const convexLibrary = useQuery(api.chordCharts.library, isAuthenticated ? {} : "skip");
+  // `selectedSongId` is device-local (persisted in localStorage regardless of sign-in state — see
+  // ChordCharts.tsx's own VIEW_KEY), so it can be a signed-out-library id left over from before
+  // the user signed in. Those are `crypto.randomUUID()` strings (lib/chordChartsLibrary.ts's
+  // `freshId`) — always containing a "-", which a real Convex id never does — so sending one
+  // through as a Convex document id fails argument validation and crashes the query outright.
+  // Guard against that shape mismatch here rather than letting it reach the server.
+  const validSelectedSongId =
+    selectedSongId && !selectedSongId.includes("-") ? selectedSongId : null;
   const convexBars = useQuery(
     api.chordCharts.getSongBars,
-    isAuthenticated && selectedSongId
-      ? { songId: selectedSongId as Id<"chordChartSongs"> }
+    isAuthenticated && validSelectedSongId
+      ? { songId: validSelectedSongId as Id<"chordChartSongs"> }
       : "skip",
   );
   const importMutation = useMutation(api.chordCharts.importSongs);
