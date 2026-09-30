@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ChordChart from "@/components/ChordChart";
+import ChordChartEditor from "@/components/ChordChartEditor";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import Hint from "@/components/Hint";
@@ -13,11 +14,13 @@ import {
   ListIcon,
   MaximizeIcon,
   MinimizeIcon,
+  PencilIcon,
   SearchIcon,
   SlidersIcon,
   TrashIcon,
 } from "@/components/tools";
 import { formatComposer, keyPitchClass, KEY_NAMES, parseIrealPlaylist, transposeSong } from "@/lib/iRealPro";
+import { decodeChartString, looksLikeChartString } from "@/lib/chartString";
 import { UNSORTED_PLAYLIST_ID } from "@/lib/chordChartsLibrary";
 import {
   useChordChartsLibrary,
@@ -30,6 +33,22 @@ const VIEW_KEY = "jam-practice-chord-charts-view";
 const VIEW_DEFAULTS = { selectedId: "", barsPerRow: 4 };
 
 const BARS_PER_ROW_OPTIONS = [2, 3, 4, 6, 8];
+
+/** What "Import a playlist" actually reads: a jackshed chart link (`lib/chartString.ts`) first,
+    falling back to a real iReal Pro playlist link (`parseIrealPlaylist`) if it isn't one of
+    those — quietly still supported, since a real iReal link is still perfectly good input, but
+    deliberately never named anywhere in this panel's own copy (placeholder, hint text, or this
+    error message) the way it used to be. Whichever parser actually recognized the input wins; if
+    neither does, the error stays generic rather than leaking iReal Pro's own "should contain
+    irealb://" message, which would otherwise be the one clue this fallback exists at all. */
+function parsePlaylistInput(text: string) {
+  if (looksLikeChartString(text)) return decodeChartString(text);
+  try {
+    return parseIrealPlaylist(text);
+  } catch {
+    throw new Error("Couldn't read that — paste a jackshed chord chart link.");
+  }
+}
 
 export default function ChordCharts() {
   // barsPerRow/selectedId are a device-local display preference, not meaningfully "saved data" to
@@ -74,6 +93,7 @@ export default function ChordCharts() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [maximized, setMaximized] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Escape exits the maximized (full-screen) chart, same as every other dismissable overlay in
@@ -122,11 +142,11 @@ export default function ChordCharts() {
   async function importText(text: string) {
     let playlist;
     try {
-      playlist = parseIrealPlaylist(text);
+      playlist = parsePlaylistInput(text);
     } catch (e) {
       setStatus({
         kind: "error",
-        message: e instanceof Error ? e.message : "Couldn't read that link.",
+        message: e instanceof Error ? e.message : "Couldn't read that.",
       });
       return;
     }
@@ -165,7 +185,7 @@ export default function ChordCharts() {
 
   return (
     <ToolLayout title="Chord Charts" layout="stacked" topAligned options={null}>
-      <div className="flex w-full flex-1 flex-col gap-4 overflow-x-hidden xl:min-h-[calc(100vh-10rem)] xl:flex-row xl:items-center">
+      <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 overflow-x-hidden xl:flex-row xl:items-start">
         <div className="flex w-full min-w-0 flex-col gap-3 xl:w-80 xl:shrink-0">
           <CollapsiblePanel
             id="chord-charts-tunes"
@@ -229,15 +249,13 @@ export default function ChordCharts() {
             icon={BookIcon}
           >
             <Hint>
-              On iRealPro.com, open a playlist from the forums and copy its link
-              (it starts with{" "}
-              <code className="rounded bg-background px-1">irealb://</code>).
-              Paste it below, or choose a text file it was saved to.
+              Paste a jackshed chord chart link below — export one from the chart builder, or from
+              a chart someone shared with you — or choose a text file it was saved to.
             </Hint>
             <textarea
               value={linkText}
               onChange={(e) => setLinkText(e.target.value)}
-              placeholder="irealb://..."
+              placeholder="jackshed://..."
               rows={4}
               className="w-full resize-y rounded-lg bg-background p-2 text-left font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent"
             />
@@ -274,6 +292,24 @@ export default function ChordCharts() {
                 {status.message}
               </p>
             )}
+          </CollapsiblePanel>
+
+          <CollapsiblePanel
+            id="chord-charts-create"
+            title="Create a chord chart"
+            icon={PencilIcon}
+          >
+            <Hint>
+              Build a chart bar by bar, then save it straight into your library or export it as a
+              chart link to share.
+            </Hint>
+            <button
+              type="button"
+              onClick={() => setShowEditor(true)}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover"
+            >
+              Open the chart builder
+            </button>
           </CollapsiblePanel>
 
           <CollapsiblePanel
@@ -384,6 +420,13 @@ export default function ChordCharts() {
             setConfirmClear(false);
           }}
           onCancel={() => setConfirmClear(false)}
+        />
+      )}
+
+      {showEditor && (
+        <ChordChartEditor
+          onSave={(song) => importSongs([song], song.title)}
+          onClose={() => setShowEditor(false)}
         />
       )}
     </ToolLayout>

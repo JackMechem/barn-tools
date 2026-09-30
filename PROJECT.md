@@ -496,6 +496,123 @@ what exists, what's next, and the honest state of what's been verified.
   against an original chart's own accidentals before now) or whether the dropdown itself opens/
   positions sensibly from inside the "Display" panel in a real browser — this sandbox still has no
   working browser, same caveat as everything else UI-shaped in Chord Charts.
+
+  **jackshed's own chart-link format, and a from-scratch chart builder** (per a direct request:
+  "make a custom way of representing chord charts in a string kinda like the irealpro links... if
+  I paste an ireal pro playlist link into there it should still worki but I dont want it to say
+  anywhere that you can do that... create a tool within the chord chart page to create chord
+  charts"). Three pieces:
+  - `lib/chartString.ts` — `encodeChartString`/`decodeChartString`, a `jackshed://<base64 JSON>`
+    string encoding the exact same `IRealPlaylist`/`IRealSong`/`Bar` shape this app already parses
+    an iReal chart into, rather than inventing a second token grammar to mimic iReal's own scrambled
+    encoding — "kinda like the irealpro links" in that it's one opaque, copy-pasteable string, not
+    in how it's actually encoded underneath. UTF-8-safe via `TextEncoder`/`TextDecoder` +
+    `btoa`/`atob` (not the deprecated `escape`/`unescape` trick), so a title/composer with accented
+    characters round-trips correctly. `decodeChartString` is tolerant of a malformed individual
+    song the same way `lib/profileTunes.ts`'s `resolvePublicTunes` already is — a bad entry is
+    dropped (missing/wrong-typed fields fall back to sane defaults, e.g. a missing time signature
+    becomes 4/4) rather than failing the whole import — and its own error message is deliberately
+    generic, never naming iReal Pro, since it's the message a normal user actually sees.
+  - **"Import a playlist" now reads this format first** (`ChordCharts.tsx`'s `parsePlaylistInput`):
+    `looksLikeChartString` checks for the `jackshed://` prefix, and only if that doesn't match does
+    it fall through to the *existing*, completely unmodified `parseIrealPlaylist` — a real iReal
+    Pro link genuinely still works, exactly as before, but that fallback is now quiet on purpose:
+    the panel's hint text, its textarea placeholder, and the generic catch-all error shown when
+    *neither* parser recognizes the input were all rewritten to never mention iReal Pro or
+    `irealb://` anywhere a user can see them (grepped the whole user-visible surface for both
+    strings afterward to check for a leak, not just the obvious spots — caught and fixed one real
+    one this way: `components/tools.tsx`'s `NAV_LINKS` description for this tool, "Import iReal Pro
+    playlists...", shown in the sidebar/command palette, had the exact same problem and wasn't
+    something a first pass over just `ChordCharts.tsx` would have caught). Code comments inside
+    `lib/iRealPro.ts`/`ChordChart.tsx` explaining *why* the parser/renderer work the way they do
+    still reference iReal Pro by name, deliberately — that's maintainer-facing, not the user-facing
+    surface the request was actually about.
+  - **`ChordChartEditor.tsx`** — the new "Create a chord chart" panel's modal, a from-scratch
+    builder reached from its own button next to "Import a playlist." Deliberately scoped down from
+    everything a pasted iReal chart can represent — no repeats, numbered endings, sections, or
+    directives, just a flat ordered list of bars — per the request's own "doesn't need to be crazy
+    right now... no need to make it perfect as long as the functionality is there." Metadata
+    (title/composer/style/key/time signature) are plain fields; each bar is typed as one line of
+    plain text in the *exact* iReal-style shorthand this app already uses everywhere else
+    ("`C^7`", "`F-7`", "`Bb7#5/D`", "`NC`" for no chord, space-separated for more than one chord in
+    a bar) — reusing the notation rather than building a second, structured per-field chord picker,
+    so there's exactly one chord grammar in this app to learn, not two. Two new exports in
+    `lib/iRealPro.ts` make this possible: `parseChordToken` (one token -> a `ChordSlot`, reusing
+    the same `CHORD_RE`/`splitMain` `tokenizeChart` itself already uses, just applied to a
+    standalone token instead of a parsing stream, with a `normalizeChordToken` uppercase-the-letter
+    convenience for hand-typed input a pasted chart never needed) and `parseBarSlots` (one bar's
+    space-separated tokens -> that bar's slots, silently dropping an unrecognized token rather than
+    failing the whole bar, so one typo doesn't erase everything else already typed in that bar). A
+    live preview renders the chart being built through the *same* `ChordChart` component every
+    other chart in this tool uses — not a separate approximation of it — which doubles as the only
+    validation feedback: a typo just doesn't show up as a chord in the preview, rather than a
+    separate per-token error message. Two ways a built chart leaves the modal, both reachable from
+    its footer: **Save to library** (calls the same `importSongs` "Import a playlist" itself uses,
+    in a playlist named after the chart's own title — "every chart is in a playlist" holds the same
+    way here as for anything else added to the library) and **Export as chart link** (reveals the
+    `jackshed://` string in a read-only textarea with a Copy button, `navigator.clipboard.writeText`
+    with no fallback — this app's first use of the Clipboard API, and a genuine platform-only
+    choice: if permission is denied or the API's unavailable, the text is still visible and
+    selectable by hand in the textarea, so there's no dead end, just a smaller convenience lost).
+    Both require a non-empty title first (an inline error message, same shape as every other
+    required-field validation already in this app, e.g. Community's own "Give this post a title.").
+
+  Verified with two synthetic Node scripts run directly against the real functions (not mocks).
+  The first, against `parseChordToken`/`parseBarSlots`: `"C^7"` and lowercase `"c^7"` both parse to
+  the identical chord (confirming the uppercase normalization); `"Bb7#5/D"` correctly splits into
+  root/accidental/quality/bass; `"NC"`/`"nc"` both parse as no-chord; a bare `"W7"` (iReal's own
+  mid-chart "repeat the last chord" marker, meaningless with no previous-chord context here) is
+  correctly rejected rather than silently becoming a chord with an invalid `"W"` root; garbage
+  input returns `null` rather than throwing; and a bad token in the middle of a multi-chord bar is
+  dropped while the good tokens on either side survive. The second, against
+  `encodeChartString`/`decodeChartString`: a full song (multiple bars, a two-chord bar, a blank
+  bar, accented-safe title/composer/key) round-trips through encode-then-decode byte-for-byte
+  identical to the original; `looksLikeChartString` correctly recognizes the app's own output and
+  correctly rejects both a real iReal-style `irealb://` string and arbitrary plain text (confirming
+  the two formats stay genuinely distinguishable, not just informally); a non-matching string
+  throws an error that was checked, by regex, to never contain the word "ireal" anywhere in its
+  message; garbage base64 after a valid `jackshed://` prefix throws instead of crashing; and a
+  payload with one well-formed song alongside a titleless object and a bare number correctly keeps
+  only the one valid song, with its missing time signature defaulting to 4/4 rather than throwing.
+  `tsc`, `eslint`, and `next build` all pass. **Not verified**: that a real iReal Pro link *itself*
+  still parses successfully through the now-wrapped fallback path — `parseIrealPlaylist`'s own
+  internals are completely untouched by this change (only wrapped in a try/catch one level up), and
+  that function was already extensively verified against a real ~1,460-song forum playlist in an
+  earlier session (see this tool's own bullet above), so there's no new risk introduced here
+  specifically — but this sandbox has no real iReal Pro link on hand to re-run that exact check
+  against after the wrapping. Also unverified, the same way everything else in this tool is: how
+  `ChordChartEditor`'s two-column (bar list / live preview) layout actually looks and behaves in a
+  real browser, whether the Copy button's clipboard permission prompt (if a browser shows one)
+  interrupts the flow at all, and whether typing chord shorthand by hand feels as easy as the
+  request asked for — "as easy to understand as possible" is a UX claim this sandbox has no way to
+  confirm by actually using the tool.
+
+  **Layout fix** (a direct follow-up with a screenshot: "not so much space between the options and
+  the chart... so like the other pages where everything is in a column in the center"): the options
+  sidebar + chart row's own wrapper div had `xl:min-h-[calc(100vh-10rem)] xl:items-center` and no
+  width cap — forcing the row to nearly the full viewport height and then vertically centering both
+  columns inside it, which is what actually produced the huge gap above everything (the options
+  column's real content height is nowhere near that forced minimum), not anything about
+  `ToolLayout`'s own `topAligned` prop (already `true` here, and working correctly one level out).
+  The uncapped width compounded it horizontally too: `ChordChart.tsx`'s own root div already caps
+  and centers the rendered chart at `max-w-2xl` (a deliberate, unrelated design choice, left alone)
+  within whatever box it's given, so with no cap on the *row* itself, that box stretched to the
+  full remaining viewport width on a wide monitor and centered the chart far right of the
+  left-hugging sidebar — exactly the dead space in the screenshot. Fixed by dropping the forced
+  min-height and `items-center` (now `xl:items-start`, both columns just take their own natural
+  height) and adding `mx-auto max-w-5xl` to the row — the same width split-layout tool pages
+  already use for their own two-region (options + content, no side panel) case, `ToolLayout.tsx`'s
+  own `xl:max-w-5xl` — so this now matches "the other pages" literally, the same number, not just a
+  similar-looking one. Not a restructure into a single vertical column
+  the way `layout="stacked"`'s own built-in options-below-content shape works for Slow Downer/
+  Recorder (which this tool's custom Tunes/Import/Create/Display sidebar never actually used in
+  the first place — `ChordCharts.tsx` passes `options={null}` to `ToolLayout` and builds its own
+  layout entirely inside `children`) — the sidebar-beside-chart arrangement itself wasn't what was
+  reported as broken, just the space around it, so that's the only thing this touched. `tsc`,
+  `eslint`, and `next build` all pass. **Not verified**: how much of the gap this actually closes
+  once seen rendered — the reasoning above is sound (traced both the vertical and horizontal cause
+  to specific classes, not guessed), but this sandbox still can't render the page to confirm it
+  matches what "like the other pages" was actually asking for.
 - **Slow Downer** — load a local audio/video file, slow playback without pitch shift, loop
   sections, add named markers with notes, zoom/pan the waveform.
 - **Recorder** — multitrack recording: per-track clips, punch-in recording, trim/crop/repeat/move

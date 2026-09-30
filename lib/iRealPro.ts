@@ -328,6 +328,59 @@ export function tokenizeChart(raw: string): {
   return { bars, timeSignature };
 }
 
+/** Uppercases a chord token's root/bass letters ("c^7/e" -> "C^7/E") without touching anything
+    else — the quality suffix's own letters (h, o, s, u, a, d, l, t) are already lowercase by
+    convention and must stay that way. A small convenience for hand-typed input (the chart
+    builder, `ChordChartEditor.tsx`) that a pasted, already-correctly-cased chart never needed. */
+function normalizeChordToken(token: string): string {
+  return token.replace(/(^|\/)([a-g])/g, (_, pre: string, letter: string) => pre + letter.toUpperCase());
+}
+
+/** Parses one typed chord token ("C^7", "Bb7alt", "c^7/e", "NC", ...) into a `ChordSlot`, or
+    `null` if it isn't recognizable — the same plain iReal-style grammar `tokenizeChart` reads out
+    of a pasted chart, `CHORD_RE` and all, just applied to one standalone token instead of a
+    stream. Used by the from-scratch chart builder to turn what's typed into a bar's actual
+    chords. Rejects a bare `"W"` (iReal's own "repeat the previous chord" marker) — `CHORD_RE`
+    itself doesn't distinguish it from a real root letter, but there's no previous-chord context to
+    resolve it against here the way `tokenizeChart`'s own stream parsing has. */
+export function parseChordToken(token: string): ChordSlot | null {
+  const trimmed = token.trim();
+  if (!trimmed) return null;
+  if (/^n\.?c\.?$/i.test(trimmed)) return { kind: "nc" };
+  const normalized = normalizeChordToken(trimmed);
+  const match = CHORD_RE.exec(normalized);
+  if (!match || match[0].length !== normalized.length) return null;
+  const slashIndex = normalized.indexOf("/");
+  const main = slashIndex === -1 ? normalized : normalized.slice(0, slashIndex);
+  if (main[0] === "W") return null;
+  const bass =
+    slashIndex === -1
+      ? undefined
+      : (() => {
+          const b = normalized.slice(slashIndex + 1);
+          return {
+            letter: b[0],
+            accidental: b[1] === "b" || b[1] === "#" ? (b[1] as "b" | "#") : undefined,
+          };
+        })();
+  const { letter, accidental, quality } = splitMain(main);
+  return { kind: "chord", letter, accidental, quality, bass };
+}
+
+/** Parses one bar's worth of typed chord text — space-separated tokens, each read by
+    `parseChordToken` — into that bar's chord slots. An unrecognized token is silently dropped
+    rather than failing the whole bar, so one typo doesn't lose every other chord already typed;
+    the chart builder's own live preview is the feedback for "did this actually parse," not a
+    separate validation message. */
+export function parseBarSlots(text: string): ChordSlot[] {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(parseChordToken)
+    .filter((slot): slot is ChordSlot => slot !== null);
+}
+
 /** iReal Pro stores a composer credit "Lastname Firstname" (its charts sort by last name), e.g.
     "Rodgers Richard" or "Van Heusen Jimmy" — this app displays names the normal way round. Where
     a song has multiple composers joined by a hyphen with no first names given at all (e.g. a

@@ -548,7 +548,7 @@ export const NAV_LINKS = [
     href: "/chord-charts",
     label: "Chord Charts",
     description:
-      "Import iReal Pro playlists and read the chord charts, styled to match the rest of the site.",
+      "Import, build, and read chord charts, styled to match the rest of the site.",
     icon: ChordChartIcon,
     category: "Practice" as Category,
   },
