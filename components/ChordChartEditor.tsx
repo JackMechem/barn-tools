@@ -110,7 +110,10 @@ export default function ChordChartEditor({
     if (bars.length <= 1) return;
     const next = bars.filter((_, i) => i !== index);
     setBars(next);
-    setActiveIndex((i) => Math.min(i, next.length - 1));
+    // If the removed bar sat before the active one, every later bar's index shifts down by one —
+    // the active bar needs to track the *same* bar to stay on it (not just clamp to whatever now
+    // happens to sit at its old numeric index, which would silently jump to a different bar).
+    setActiveIndex((i) => (index < i ? Math.min(i - 1, next.length - 1) : Math.min(i, next.length - 1)));
   }
 
   /** Pressing Enter in the last bar adds a new one and jumps straight into it, so typing a whole

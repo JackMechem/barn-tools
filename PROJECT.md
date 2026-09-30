@@ -580,12 +580,12 @@ what exists, what's next, and the honest state of what's been verified.
   that function was already extensively verified against a real ~1,460-song forum playlist in an
   earlier session (see this tool's own bullet above), so there's no new risk introduced here
   specifically — but this sandbox has no real iReal Pro link on hand to re-run that exact check
-  against after the wrapping. Also unverified, the same way everything else in this tool is: how
-  `ChordChartEditor`'s two-column (bar list / live preview) layout actually looks and behaves in a
-  real browser, whether the Copy button's clipboard permission prompt (if a browser shows one)
-  interrupts the flow at all, and whether typing chord shorthand by hand feels as easy as the
-  request asked for — "as easy to understand as possible" is a UX claim this sandbox has no way to
-  confirm by actually using the tool.
+  against after the wrapping. Also unverified, the same way everything else in this tool is:
+  whether the Copy button's clipboard permission prompt (if a browser shows one) interrupts the
+  flow at all, and whether typing chord shorthand by hand feels as easy as the request asked for —
+  "as easy to understand as possible" is a UX claim this sandbox has no way to confirm by actually
+  using the tool. (`ChordChartEditor`'s original bar-list/live-preview layout described here was
+  superseded by the inline-on-the-chart redesign below, two direct follow-ups later.)
 
   **Layout fix** (a direct follow-up with a screenshot: "not so much space between the options and
   the chart... so like the other pages where everything is in a column in the center"): the options
@@ -613,6 +613,90 @@ what exists, what's next, and the honest state of what's been verified.
   once seen rendered — the reasoning above is sound (traced both the vertical and horizontal cause
   to specific classes, not guessed), but this sandbox still can't render the page to confirm it
   matches what "like the other pages" was actually asking for.
+
+  **The builder redesigned to type directly on the chart, plus a shared symbol keypad** (a direct
+  follow-up: "make it so the chart builder is like when you maximise a chart and it lets you type
+  directly on the chart with an add bar button on the right of the last bar... make a little
+  keypad like the one on sibelius... for all the symbols"). The original version's separate
+  bar-list-on-the-left / `ChordChart`-preview-on-the-right split is gone; bars now live in one grid
+  built from `ChordChart.tsx`'s own exports (`COL_WIDTH`, `BAR_HEIGHT`, `chordFont`, `ChordLabel`,
+  `FitChordRow`, `TimeSignatureGlyph` — all newly `export`ed, previously private to that file) so
+  the editor *is* the chart, not a second approximation of one styled to look similar. Each bar
+  (`BarCellEditor`) is one of two things: **not** the active bar, it renders its parsed chords
+  through the exact same `ChordLabel`/`FitChordRow` the real chart uses (a faint centered dot if
+  still blank); **is** the active bar, it's a plain-text `<input>` showing the raw typed shorthand
+  instead — deliberately not auto-converting `^`/`h`/`o`/`#`/`b` into their pretty glyphs live
+  while typing, which would fight the text cursor mid-keystroke (the same reasoning Guess the
+  Chord's own answer field already settled on, now shared). There's always exactly one active bar
+  (`activeIndex`, never `null` — a text-cursor-like "there's always a current position" model, not
+  a nullable "maybe nothing's selected" one), which is also where the keypad inserts. Clicking a
+  different bar, or pressing Enter, moves it: Enter in the *last* bar adds a new one and jumps
+  straight into it (satisfying "an add bar button on the right of the last bar" — that button
+  still exists, as a plain `+` sitting in the same flex-wrap row immediately after the last bar
+  cell, but Enter is the faster path once you're already typing) — in any other bar, Enter just
+  steps to the next one, so typing a whole chart can stay a straight "type, Enter, type, Enter..."
+  line. Escape inside a bar's input deliberately `stopPropagation`s rather than bubbling up to this
+  modal's own Escape-closes-everything handler — it only blurs that one bar, since losing an entire
+  typed-out chart because Escape was meant to back out of one bar would be a bad trade the metadata
+  fields above don't have to worry about (a stray Escape there closing the whole modal is
+  unchanged, and fine — losing an empty Title field is a much smaller loss). Focusing the
+  DOM `<input>` after `activeIndex` changes (adding a bar, or clicking a different one) can't
+  happen in the same tick that sets it — the input doesn't exist yet, since the *previous* active
+  bar is still the one rendered as an input until the next render commits — so a `focusIndexRef`
+  plus a `useEffect` watching `[activeIndex, bars.length]` focuses it exactly once the render
+  reflecting the change has actually happened — the same "the DOM doesn't have this yet the same
+  tick `setState` was called" timing problem the keypad's own cursor-insertion (below) runs into
+  for the identical reason, just solved with a `useEffect` here instead of a bare
+  `requestAnimationFrame`, since this one has to wait for a full re-render (a different element
+  appearing) rather than just a value settling inside an element that already exists.
+
+  **`components/ChordSymbolKeypad.tsx`** is new, pulled out of Guess the Chord rather than built a
+  second time: that trainer already had exactly this — a small grid of buttons for `-`/`^`/`o`/`h`/
+  `+`/`#`/`b`/`/`/`sus`/`add`, each showing its `prettyQuality`-formatted glyph as the button face
+  and inserting the plain iReal text at the field's current cursor position — per the request
+  naming Sibelius's own on-screen keypad as the visual reference, now laid out as a fixed
+  `grid-cols-5` (a deliberate small palette, not a loosely wrapping button cloud, closer to what a
+  real keypad panel looks like) instead of the `flex flex-wrap` it used before. The component
+  itself is purely presentational (`onInsert(key.insert)`, one callback) — *where* the text actually
+  gets inserted is each caller's own job, since that differs: Guess the Chord always targets its
+  one answer field, the chart builder targets whichever bar is currently active, and the underlying
+  "insert at cursor position, wait a frame since the DOM `<input>` doesn't have the new value yet
+  the same tick `setState` is called, then restore the caret right after it" logic is otherwise
+  identical in both, copied from Guess the Chord's own already-working `insertSymbol` rather than
+  reinvented. Extracting this shrank `GuessTheChord.tsx` enough that two pre-existing
+  `eslint-disable-next-line react-hooks/purity` comments (documented elsewhere in this file, on
+  `lockInRound`/`start` — the React Compiler's lint integration bails out of analyzing a
+  large/complex component before it would reach that `performance.now()` call, the same false
+  positive Guess the Interval's identical pattern still gets flagged for) became genuinely unused
+  — `eslint` said so directly (`Unused eslint-disable directive`), not guessed — and were removed;
+  Guess the Interval's own pair, in its own separate, still-large file, are untouched and still
+  needed.
+
+  A real correctness bug was caught in self-review (not by any tooling — this is plain JS logic
+  `tsc`/`eslint` have no way to reason about) and fixed before this ever got used: `removeBar`
+  originally just clamped `activeIndex` to the new bar count after a deletion
+  (`Math.min(activeIndex, next.length - 1)`), which is right when the removed bar came *after* the
+  active one but silently wrong when it came *before* — every later bar's index shifts down by one
+  when an earlier bar is deleted, so a plain clamp leaves `activeIndex` pointing at the bar that
+  now happens to sit at that old number, not the bar that was actually being edited (e.g. bars
+  `[A,B,C,D]` with `C` active, deleting `A`, would silently leave `D` marked active instead of `C`
+  tracking its new position). Fixed to shift `activeIndex` down by one specifically when the
+  removed bar's index was less than it, verified with a small synthetic script checking all four
+  relative orderings (removed-before-active, removed-after, removing the active bar itself, and
+  the down-to-one-bar edge case) plus the existing clamp — all five pass.
+
+  Verified: `tsc`, `eslint` (including confirming zero new warnings, and that the two now-stale
+  `eslint-disable` comments were safe to remove rather than masking a real regression), and
+  `next build` all pass; `git diff --stat` confirms `GuessTheChord.tsx` only shrank (its own
+  keypad array and JSX replaced by one `<ChordSymbolKeypad>` call) rather than having any of its
+  actual answer-grading logic touched. **Not verified**, the same as this whole tool's UI: whether
+  clicking between bars, typing, and using the keypad actually feels like "typing directly on the
+  chart" the way the request pictured it, whether the display-mode `ChordLabel` rendering (natural,
+  unscaled size — this grid deliberately doesn't run through `PageFit`'s scale-to-fit the way a
+  real rendered chart does, so it can stay a stable, always-editable size instead of shrinking for
+  a long chart) reads clearly at that size inside the modal, and whether Enter-to-advance and the
+  keypad's cursor-insertion behave correctly across real browsers and real keyboards — this
+  sandbox still has no way to click through any of it.
 - **Slow Downer** — load a local audio/video file, slow playback without pitch shift, loop
   sections, add named markers with notes, zoom/pan the waveform.
 - **Recorder** — multitrack recording: per-track clips, punch-in recording, trim/crop/repeat/move
