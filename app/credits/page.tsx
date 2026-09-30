@@ -6,7 +6,7 @@ export const metadata = {
 
 export default function CreditsPage() {
   return (
-    <LegalPage title="Credits" updated="September 29, 2026">
+    <LegalPage title="Credits" updated="September 30, 2026">
       <p className="text-sm leading-relaxed text-foreground/90">
         jackshed&apos;s sounds are almost entirely synthesized in the browser (see the Tone menu in
         the trainers, the metronome, and Guess the Interval/Guess the Chord for the full list) —
@@ -49,6 +49,20 @@ export default function CreditsPage() {
           instant. See the{" "}
           <LegalLink href="/privacy">Privacy Policy</LegalLink> for what that means for your
           browser&apos;s outgoing requests.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Typeface">
+        <p>
+          Chord Charts sets chord symbols in{" "}
+          <LegalLink href="https://github.com/steinbergmedia/petaluma">Petaluma</LegalLink>, the
+          music notation font family Steinberg built for its Dorico scoring software — specifically
+          <strong> Petaluma Script</strong> (a hand-inked text face) for the letters and numbers,
+          paired with <strong>Petaluma</strong> itself for the major-seventh and diminished chord
+          symbols, which it draws as real engraved marks rather than a stand-in character from an
+          ordinary font. Unlike the audio above, both are bundled with jackshed itself rather than
+          fetched from elsewhere, under Steinberg&apos;s own{" "}
+          <LegalLink href="https://scripts.sil.org/OFL">SIL Open Font License 1.1</LegalLink>.
         </p>
       </LegalSection>
     </LegalPage>

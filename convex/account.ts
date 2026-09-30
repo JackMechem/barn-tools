@@ -233,12 +233,22 @@ export const performDelete = internalMutation({
     for (const row of followers) await ctx.db.delete(row._id);
 
     // Same reasoning: a Community chord-chart or tune-list post is public-facing content, not
-    // private synced tool data, so neither should outlive the account that posted it.
+    // private synced tool data, so neither should outlive the account that posted it. Each
+    // chord-chart post's own songs (`communityChordChartSongs`) are deleted first — they're a
+    // separate table now (one row per song, not inline on the post — see that table's own
+    // comment), so they'd otherwise be left behind as orphans once the post row itself is gone.
     const chartPosts = await ctx.db
       .query("communityChordCharts")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
-    for (const row of chartPosts) await ctx.db.delete(row._id);
+    for (const row of chartPosts) {
+      const songs = await ctx.db
+        .query("communityChordChartSongs")
+        .withIndex("by_post", (q) => q.eq("postId", row._id))
+        .collect();
+      for (const song of songs) await ctx.db.delete(song._id);
+      await ctx.db.delete(row._id);
+    }
     const tunePosts = await ctx.db
       .query("communityTunes")
       .withIndex("by_user", (q) => q.eq("userId", userId))

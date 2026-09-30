@@ -113,28 +113,57 @@ export default defineSchema({
 
   /** A chord chart, or a whole chord-chart playlist, posted to the Community page for any
       signed-in account to browse and import — this app's first user-generated content beyond a
-      profile itself. `songs` is a *snapshot* taken at post time (the same `IRealSong[]` shape
-      `lib/iRealPro.ts` produces and `ChordCharts.tsx`'s own library stores), not a live reference
-      to the poster's library — editing or clearing your own library afterward doesn't change or
-      break what you already posted, same reasoning as a public profile's tune-copy being a
-      snapshot (`lib/profileTunes.ts`). Stored as `v.any()` rather than a hand-typed validator
-      matching `IRealSong`/`Bar`'s full discriminated-union shape (chord slots, repeat bars,
-      endings, directives, ...) — the same "opaque JSON blob" call already made for
-      `syncedSettings` above, for the same reason: a change to that shape shouldn't also need a
-      matching schema migration here. Posting requires the caller's *own* profile to be
-      `isPublic` (checked in `convex/communityChordCharts.ts`'s `create`, not enforced by the
-      schema) — browsing/importing only requires being signed in, not a public profile of your
-      own. A post is filtered out of every read once its author's profile isn't (or is no longer)
-      public, mirroring every other privacy rule in this app. */
+      profile itself. Metadata only — `songCount` instead of the songs themselves, which live in
+      `communityChordChartSongs` below, one row per song, the exact same "don't put unboundedly
+      large data in one document" split `chordChartPlaylists`/`chordChartSongs`/
+      `chordChartSongBars` already use for the personal library (see that table's own comment).
+      This table used to hold every song inline as one `v.any()` blob — worked fine for a small
+      post, but a genuinely large one (someone posting ~1,400 jazz standards at once) hit the
+      *exact* same 1 MiB single-document ceiling the personal library already broke on, just one
+      layer up. Posting requires the caller's *own* profile to be `isPublic` (checked in
+      `convex/communityChordCharts.ts`'s `create`, not enforced by the schema) — browsing/
+      importing only requires being signed in, not a public profile of your own. A post is
+      filtered out of every read once its author's profile isn't (or is no longer) public,
+      mirroring every other privacy rule in this app.
+      `songTitles` — every song's title, denormalized here from `communityChordChartSongs` at post
+      time — exists purely so Browse/My Posts can search "by song name" without re-reading every
+      song row (which would mean re-reading their `bars` too, since Convex has no partial-field
+      projection; exactly the read-cost problem this whole split was built to avoid). `optional`
+      since posts created before this field existed don't have it — `list`/`mine`/`listByUser`
+      treat a missing one as `[]` (that post just isn't matchable by song name, only by its own
+      title, until it's re-posted) rather than needing a migration. */
   communityChordCharts: defineTable({
     userId: v.id("users"),
     title: v.string(),
     description: v.string(),
-    songs: v.any(),
+    songCount: v.number(),
+    songTitles: v.optional(v.array(v.string())),
     createdAt: v.number(),
   })
     .index("by_user", ["userId"])
     .index("by_createdAt", ["createdAt"]),
+
+  /** One song per row within a Community chord-chart post — split from the post itself (and its
+      own metadata split from `bars`, same as `chordChartSongs`/`chordChartSongBars`) so no single
+      document's size grows with how many songs someone posts, and so listing/previewing a big
+      post never has to pull every song's `bars` at once. `create` (`convex/communityChordCharts.ts`)
+      writes these by copying straight from the poster's own `chordChartSongs`/`chordChartSongBars`
+      rows entirely server-side — a post's data is a snapshot (editing or clearing your own library
+      afterward doesn't change or break what you already posted, same reasoning as a public
+      profile's tune-copy, `lib/profileTunes.ts`), but the *copy itself* never round-trips through
+      the client: the browser only ever sends song ids it already knows about, never the (often
+      much larger) bar data those ids point to, for exactly the same reason the ids-not-blobs
+      design matters here at all — "several people posting very large playlists" was the explicit
+      scale this was built for. */
+  communityChordChartSongs: defineTable({
+    postId: v.id("communityChordCharts"),
+    title: v.string(),
+    composer: v.string(),
+    style: v.string(),
+    key: v.string(),
+    timeSignature: v.object({ top: v.number(), bottom: v.number() }),
+    bars: v.any(),
+  }).index("by_post", ["postId"]),
 
   /** The tune-list analog of `communityChordCharts` above — one post per row, `tunes` a snapshot
       of `PublicTune[]` (`lib/profileTunes.ts` — name/tempos/keys/time signature, never `notes`)
@@ -154,4 +183,54 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_createdAt", ["createdAt"]),
+
+  /** A signed-in user's personal Chord Charts library — replaces an earlier version of this
+      feature that stored the *whole* library (every song's full parsed bar list) as one
+      `syncedSettings` blob. That broke for real: importing a large iReal Pro playlist produced a
+      single JSON document over Convex's 1 MiB per-document limit, and the write was rejected
+      outright (`Value is too large (4.62 MiB > maximum size 1 MiB)`). Split across three tables
+      instead, specifically so no single document's size grows with the size of the library:
+      - `chordChartPlaylists` — just a name; songs reference it via `playlistId`, not the other way
+        around (no `songIds` array on the playlist row, which would itself grow unboundedly as
+        more songs are added to a big playlist).
+      - `chordChartSongs` — one row per song, metadata only (title/composer/style/key/time
+        signature) — deliberately *not* `bars`, so listing or deduping a library never has to
+        touch each song's own (often much larger) notation.
+      - `chordChartSongBars` — a song's parsed bar list, split into its own table so a single
+        tune's notation is the only thing that ever has to fit under the 1 MiB limit, never the
+        whole library or even a whole playlist. Fetched only for whichever one song is actually
+        displayed (`convex/chordCharts.ts`'s `getSongBars`) — never all at once as part of listing
+        the library. Posting a song to Community, or importing one back from a post, never reads
+        this table onto the client either — `communityChordCharts.create`/`importIntoLibrary` copy
+        directly between `chordChartSongBars` and `communityChordChartSongs` entirely server-side
+        (see that table's own comment).
+      Signed out, this tool is entirely unaffected and keeps using the original single-blob
+      `syncedSettings` approach via `lib/chordChartsLibrary.ts` — localStorage doesn't enforce
+      anything like Convex's 1 MiB-per-document limit, so there's no equivalent failure mode to
+      fix there. `convex/chordCharts.ts`'s `migrateFromSyncedSettings` is a one-time, entirely
+      server-side migration for anyone who already had a (successfully-synced, and therefore
+      already-under-1-MiB) library stored the old way before this change. */
+  chordChartPlaylists: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    createdAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  chordChartSongs: defineTable({
+    userId: v.id("users"),
+    playlistId: v.id("chordChartPlaylists"),
+    title: v.string(),
+    composer: v.string(),
+    style: v.string(),
+    key: v.string(),
+    timeSignature: v.object({ top: v.number(), bottom: v.number() }),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_playlist", ["playlistId"]),
+
+  chordChartSongBars: defineTable({
+    songId: v.id("chordChartSongs"),
+    bars: v.any(),
+  }).index("by_song", ["songId"]),
 });

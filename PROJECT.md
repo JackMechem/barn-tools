@@ -358,6 +358,144 @@ what exists, what's next, and the honest state of what's been verified.
 --experimental-strip-types`, not committed) — no exceptions, no malformed chords, ~4.5MB of
   JSON for that whole playlist (comfortably under typical localStorage limits, but worth knowing
   if several large playlists get imported).
+  **Every imported chart belongs to a playlist** (`lib/chordChartsLibrary.ts`'s `Library` type —
+  `{songs, playlists}`, where a `Playlist` is just a name plus a list of song ids) — per a direct
+  follow-up request, since the library used to be one flat list with no grouping at all. Pasting an
+  iReal Pro link creates (or, re-pasting the same playlist later, merges into — matched
+  case/whitespace-insensitively by name) a playlist named after that playlist's own name
+  (`parseIrealPlaylist`'s `name`, e.g. "Real Book vol. 1"); importing from a Community chord-chart
+  post (`CommunityChordCharts.tsx`) does the same under that post's title, whether it's "Import
+  all" or a single song pulled out of a bigger post — either way it lands in a playlist named after
+  the post, so charts from the same post end up grouped together rather than loose. One function,
+  `mergeIntoLibrary`, is the single place this happens — both import paths call it, so there's
+  exactly one playlist-assignment rule to reason about, not two that could drift. The "Tunes" panel
+  shows playlists as collapsible sections (sorted alphabetically) instead of one flat list;
+  expand/collapse state is plain ephemeral component state (not persisted — this is a "which
+  section is open right now" UI convenience, not real settings data), and a playlist containing the
+  currently selected song shows expanded by default with no explicit toggle needed, so picking a
+  tune from the search popup always reveals where it lives. `resolvePlaylists` is what actually
+  turns `Library` into what gets rendered — it resolves each playlist's song ids back into full
+  song objects and, importantly, buckets any song that isn't in *any* playlist into a synthetic
+  "Unsorted" playlist shown last. That bucket is what makes "every chart is in a playlist" true for
+  a library saved *before* this feature existed too: `playlists` defaults to `[]` and
+  `mergeWithDefaults` (`lib/usePersistedSettings.ts`) fills a missing field from the default rather
+  than failing, so an old library with songs but no `playlists` field just loads with everything
+  showing under "Unsorted" — no migration write needed, nothing to break if it's read on a device
+  that hasn't picked up this change yet. Deleting a song removes it from `songs` and from whichever
+  playlist(s) reference it (`removeSongFromLibrary`); a playlist left with no songs is dropped
+  entirely rather than kept as an empty shell. Verified with a synthetic Node script
+  (`mergeIntoLibrary` creating vs. merging into an existing playlist by name, a duplicate song
+  correctly skipped in a *new* playlist too — not just the one it was already in, `resolvePlaylists`
+  accounting for every song exactly once, the legacy-library-falls-into-Unsorted case, and
+  deleting a song both from a solo playlist — which then disappears — and from a multi-song one,
+  which doesn't) — not yet clicked through in a real browser (same "genuinely untested" caveat as
+  everything else UI-shaped in this app — see that section).
+  **Signed in, the library moved off `syncedSettings` onto its own dedicated tables** — the first
+  real bug this app has hit from an actual user, not a sandbox-guessed risk: importing a large
+  real iReal Pro playlist threw `Uncaught Error: Value is too large (4.62 MiB > maximum size 1
+  MiB)` from `syncedSettings:set`, because the *whole* library (every song's full parsed bar list,
+  all of it) was being written as one JSON blob in one Convex document, and Convex hard-caps a
+  single document at 1 MiB. `lib/useChordChartsLibrary.ts` is the new single entry point both
+  `ChordCharts.tsx` and `CommunityChordCharts.tsx` use instead of `useSyncedSettings`/
+  `LIBRARY_KEY` directly: signed out, it's a thin, *unchanged* wrapper over
+  `lib/chordChartsLibrary.ts`'s pure functions and the original `usePersistedSettings` blob (this
+  bug is Convex-specific — localStorage has no equivalent per-key ceiling anywhere near this, so
+  there was nothing to fix for a signed-out device); signed in, it's backed by three new Convex
+  tables (`chordChartPlaylists`/`chordChartSongs`/`chordChartSongBars`, `convex/schema.ts`) instead
+  of the generic blob mechanism, the same kind of exception `practiceSessions` and the Community
+  post tables already are, just pushed one step further: a song's *metadata* (title/composer/
+  style/key/time signature) is split into its own table from that same song's *bars*, so listing,
+  searching or deduping a library (`convex/chordCharts.ts`'s `library`/`importSongs`) never has to
+  touch `bars` at all, and `bars` is fetched only for whichever one song is actually
+  displayed (`getSongBars`) or, for bundling several already-chosen songs into a Community post,
+  in one bulk one-off call right before posting (`getSongsBars`, called via `useConvex().query`
+  rather than a live `useQuery` subscription, since it's only ever needed once). The result: no
+  single document's size grows with the size of the library, or even the size of one playlist —
+  only with the size of *one song*, which in practice is nowhere near 1 MiB (the forum-playlist
+  numbers cited above work out to roughly 3 KB/song on average). `migrateFromSyncedSettings` is a
+  one-time, entirely server-side migration (never receives the old blob as a mutation argument —
+  it's read from the database inside the mutation itself) for anyone who already had a library
+  synced the old way before this fix landed, called once per sign-in from the new hook; it's
+  provably safe from hitting the very limit it exists to work around, since the old blob could only
+  ever have been successfully *written* in the first place if it was already under 1 MiB — the
+  failure this fixes was always a rejected *write*, never a value that made it into storage
+  oversized. Verified end to end against the real dev Convex deployment (not just `tsc`/
+  `next build`): `npx convex dev --once` deploys the new schema/functions cleanly, and a plain
+  Node script using `ConvexHttpClient` confirmed the deployed functions are correctly wired and
+  behave as expected when called unauthenticated (`library` returns the empty shape rather than
+  throwing, `importSongs` throws "Not signed in", `getSongsBars` returns `{}`) — this sandbox still
+  can't authenticate as a real user to exercise an actual import end to end, so the one thing this
+  *doesn't* prove is that a real "massive playlist" import now actually succeeds for Jack, only
+  that the architecture that was silently guaranteed to fail no longer has that specific failure
+  mode built into it.
+
+  **Transpose** (per a direct follow-up request, "transpose any of the chord charts into a
+  different key"): `lib/iRealPro.ts`'s `transposeSong(song, semitones)` is a pure function that
+  returns a new `IRealSong` with every chord's root, slash bass, and the printed key label shifted
+  by `semitones`, leaving the quality suffix (`-7`, `^7`, `sus4`, ...) untouched since none of that
+  text is a note name. It wraps at the octave (`+13` behaves like `+1` — a chord symbol carries no
+  octave of its own) and returns the exact same object, not a copy, for `semitones: 0`, so a call
+  site can apply it unconditionally without a special case for "not transposed." Respelling uses a
+  fixed table (`PREFER_FLAT`) rather than trying to preserve whatever accidentals the original
+  chart happened to use: flats for every altered pitch class except F#, matching how real jazz
+  lead books actually spell a transposed key (`Db7`, `Ebm7`, but `F#7` rather than `Gb7`) — getting
+  this exactly right for every possible key would need genuine key-signature analysis this app
+  doesn't do anywhere else, so it's a deliberate, documented approximation rather than a claim of
+  always matching a real book's own spelling.
+
+  This is purely a *display* transform, never written back into the library — the same
+  "device-local display preference, not real tool data" category `ChordCharts.tsx`'s existing
+  "bars per row" setting is in, just one step more ephemeral: the chosen key is plain `useState`
+  (not even `usePersistedSettings`), and resets to "Original" whenever a different tune is
+  selected, so a transpose left on from the last chart you looked at can never silently carry over
+  and surprise you on the next one. Reset-on-selection-change is done as a render-time state
+  adjustment (`if (selectedId !== lastSelectedId) { setLastSelectedId(selectedId);
+  setTransposeKey(""); }`) rather than a `useEffect`, the pattern React's own docs recommend for
+  "adjust state when a prop changes" — no extra render/flash, and no
+  `react-hooks/set-state-in-effect` lint issue to route around (see `AccountMenu.tsx`'s own note
+  elsewhere in this file for hitting that rule the effect-based way).
+
+  The control itself is a **key dropdown** (`Select`, the same combobox every other picker in this
+  app uses), not a +/- stepper — an explicit direct follow-up correcting an earlier version that
+  used semitone-at-a-time −/+ buttons ("the key should be a drop down with all the keys and not a
+  + - thing"). `lib/iRealPro.ts` exports `KEY_NAMES` (the 12 pitch classes' canonical names, same
+  `PREFER_FLAT` spelling `transposeSong` itself uses — `C, Db, D, Eb, E, F, F#, G, Ab, A, Bb, B`)
+  and `keyPitchClass(key)` (a chart's own printed key label's tonic pitch class, or `0`/C if the
+  label doesn't parse). The "Display" panel's "Key" row offers "Original (<the chart's own key>)"
+  plus all 12 names; picking one computes the semitone distance from the chart's *own* key to the
+  chosen one (`(KEY_NAMES.indexOf(transposeKey) - keyPitchClass(selected.key) + 12) % 12`, always
+  landing in 0-11 since `transposeSong` itself wraps at the octave) and feeds that into
+  `transposeSong`. `ChordCharts.tsx` computes `displayed` from this once (`useMemo`) and passes
+  `displayed`, not the library's own `selected`, into every `<ChordChart>` render — so the original
+  song object in the library is never touched, only what's handed to the renderer for that one
+  view. The earlier version also had a second, compact floating pill near the Maximize button for
+  quick access without opening the Display panel; that was dropped rather than turned into a
+  second dropdown, both because a full `Select` button (label text + chevron) is noticeably wider
+  than the icon-only Maximize button it would have sat next to — a real collision risk against the
+  chart's own left-aligned title at narrow widths that the old slim +/- pill didn't have — and
+  because the dropdown already makes picking a specific key a single action, the main reason a
+  quick-access shortcut existed for the old increment-by-one control in the first place.
+
+  Verified with two synthetic Node scripts run directly against the real functions (not mocks).
+  The first, against `transposeSong` alone: a real tokenized chart's `+0` returns the identical
+  object; `+12` (a full octave) leaves every bar and the key completely unchanged; `+2` correctly
+  shifts a chord's root and the printed key while leaving its quality suffix untouched; `-1` and
+  `+1` land on the expected natural/flat-spelled names (`B`, `Db`); `+6` specifically lands on
+  `F#`, not the enharmonic `Gb`, confirming the deliberate exception in `PREFER_FLAT`; a slash
+  chord's bass note transposes correctly and stays a slash chord; and `-13` produces bar-for-bar
+  identical output to `-1`, confirming the octave wrap. The second, against `KEY_NAMES`/
+  `keyPitchClass` and the exact delta calculation `ChordCharts.tsx` now does: `KEY_NAMES` is the
+  expected 12-entry list in order; `keyPitchClass` correctly reads `"C"`/`"Bb"`/`"F#-"` (a minor
+  suffix doesn't throw off the tonic) and falls back to `0` for an empty or garbage key string
+  rather than throwing; picking each of the 12 `KEY_NAMES` options from a chart in "Bb" computes a
+  delta that lands `transposeSong` on exactly that target key, for all 12; and re-selecting the
+  chart's own key (picking "Bb" from a chart already in "Bb") is a true no-op — the identical
+  object back, not just equivalent content. `tsc`, `eslint`, and `next build` all pass. **Not
+  verified**: how the transposed chart actually looks rendered (whether `Db`/`F#` etc. read
+  clearly through `ChordLabel`'s existing accidental glyphs, which were only ever exercised
+  against an original chart's own accidentals before now) or whether the dropdown itself opens/
+  positions sensibly from inside the "Display" panel in a real browser — this sandbox still has no
+  working browser, same caveat as everything else UI-shaped in Chord Charts.
 - **Slow Downer** — load a local audio/video file, slow playback without pitch shift, loop
   sections, add named markers with notes, zoom/pan the waveform.
 - **Recorder** — multitrack recording: per-track clips, punch-in recording, trim/crop/repeat/move
@@ -393,47 +531,79 @@ what exists, what's next, and the honest state of what's been verified.
   Community search result (or a shared link) leads to.
 - **Community chord charts** (`components/CommunityChordCharts.tsx`, `convex/communityChordCharts.ts`)
   — the Community page's third section: browse chord charts and playlists other users have posted,
-  and import any of them straight into your own Chord Charts library. A dedicated table
-  (`communityChordCharts` in `convex/schema.ts`), not the generic `syncedSettings` blob mechanism —
-  unlike every tool's own settings/data, this has to be *readable by other users*, which
-  `syncedSettings` (deliberately self-scoped to the caller via `getAuthUserId(ctx)`) doesn't
-  support, so it gets a real table the same way `profiles`/`follows` did. A post's `songs` is a
-  **snapshot** taken at post time (the poster's own already-imported `IRealSong[]`, straight out of
-  `lib/chordChartsLibrary.ts` — the same synced blob `ChordCharts.tsx` itself reads/writes, pulled
-  into its own file so both components share one `LIBRARY_KEY`/`songKey`/`mergeSongs` instead of a
-  second copy that could drift), not a live reference to the poster's library — editing or clearing
-  your own library afterward doesn't change or break what you already posted, same "copy is a
-  snapshot" reasoning as a public profile's tune-copy (`lib/profileTunes.ts`). `songs` is stored as
-  `v.any()` rather than a hand-typed Convex validator matching `IRealSong`/`Bar`'s full
-  discriminated-union shape — the same opaque-JSON-blob call already made for `syncedSettings`,
-  for the same reason: a future change to that shape shouldn't also need a matching schema
-  migration here. **Posting requires the caller's own profile to be `isPublic`** (checked
-  server-side in `create`, the real source of truth — the UI mirrors it by showing a "make your
-  profile public" prompt instead of a Post button when it isn't, rather than only disabling
-  something and leaving the reason to a failed mutation) — **browsing only requires being signed
-  in**, not a public profile of your own, per Jack's explicit split between the two. Every read
-  (`list`/`get`) drops a post whose author's profile isn't (or is no longer) public, the same
-  privacy rule applied everywhere else cross-user data is read in this app — a post doesn't
-  outlive its author's decision to go private, and `convex/account.ts`'s `performDelete` cascades
-  here too, same as it does for `profiles`/`follows`, so deleting your account doesn't leave posts
-  behind with no reachable author. The browse list (`list`) is metadata-only (title, description,
-  song count, the author's *current* username/avatar) — a post's full chart data (`get`) is only
-  fetched once a post is actually opened (`PostDetailModal`, mounted only while a post id is
-  selected, the same conditional-query-on-`"skip"`-equivalent lazy-load pattern used elsewhere in
-  this app), so scrolling the browse list doesn't pull down every posted playlist's full bar data
-  up front. Posting (`CreatePostModal`) doesn't accept a pasted iReal link directly — it picks one
-  or more songs out of the caller's *own* Chord Charts library (a checkbox list, searchable), so
-  "post a chart" and "make a playlist" are the same action just with a different number of items
-  checked, and there's exactly one place (the Chord Charts tool itself) that ever parses iReal
-  links. Viewing a post lets each song be expanded inline into the real `ChordChart` renderer
-  (the same component/`container-type: inline-size` wrapper `ChordCharts.tsx` itself uses) before
-  deciding to import it, plus an "Import all" shortcut for the whole post — both routes go through
-  `mergeSongs` (`lib/chordChartsLibrary.ts`), the exact same title/composer/key dedupe
-  `ChordCharts.tsx`'s own playlist import has always used, so importing a chart you already have
-  (from Community or anywhere else) is always a safe no-op rather than a duplicate. Capped at 100
-  songs per post server-side (`MAX_SONGS_PER_POST`) as a sanity limit, not a measured one — real
-  playlists people would actually post (a gig setlist, a book's worth of standards) are well under
-  it.
+  and import any of them straight into your own Chord Charts library. Went through two real
+  storage designs, both broken at actual scale, before landing on the current one — worth reading
+  in order since each failure directly shaped the next design:
+  1. **v1**: one `communityChordCharts` document per post, `songs: v.any()` holding every song
+     inline, full `bars` included. Broke the same way the personal library's original blob did —
+     `create` (`songIds.length` used to be `songs.length`) had a `MAX_SONGS_PER_POST = 100` cap
+     specifically to stay under Convex's 1 MiB single-document limit, but Jack wanted to post the
+     whole jazz-standards forum playlist (~1,400 charts), which both the cap and the underlying
+     document size would have rejected outright.
+  2. **v2**: kept posting/importing on the client, but had it fetch every selected song's `bars`
+     in one bulk call (`chordCharts.getSongsBars`, an object keyed by song id) right before
+     posting, so the post itself could still be assembled and sent in one `create` call. This
+     traded the document-size problem for a different Convex limit: a plain object can have at
+     most 1024 fields, and a 1,410-song bulk fetch needed 1,410 keys —
+     `chordCharts.js:getSongsBars return value invalid: Object has too many fields (1410 > maximum
+     number 1024)`.
+  3. **Current**: **songs live in their own table** (`communityChordChartSongs`, one row per song,
+     indexed `by_post` — the post row itself only holds `songCount`), the same
+     one-row-per-song split the personal library already uses for `chordChartSongs`/
+     `chordChartSongBars`. And, critically, **posting and importing never move `bars` through the
+     client at all anymore**: `create` takes only `songIds: Id<"chordChartSongs">[]` — ids the
+     client already has from its own metadata-only library listing — and copies each song's data
+     (`title`/`composer`/`style`/`key`/`timeSignature`/`bars`) straight from the caller's own
+     `chordChartSongs`/`chordChartSongBars` rows into fresh `communityChordChartSongs` rows,
+     entirely server-side, inside the mutation. Symmetrically, `importIntoLibrary` (new — replaces
+     the old client-side `mergeIntoLibrary` call `PostDetailModal` used to make) takes a `postId`
+     and optional `songIds` (omitted = "Import all") and copies the other direction, straight from
+     `communityChordChartSongs` into the caller's own `chordChartSongs`/`chordChartSongBars`,
+     same server-side-only rule. Both share `convex/lib/chordCharts.ts`'s `findOrCreatePlaylist`/
+     `songKey` helpers (also used by `chordCharts.importSongs`) so "merge into an existing
+     playlist by name" and "skip a song you already have" mean the same thing everywhere a song
+     gets added to a library. `get` (opening a post) now returns song *metadata only*, same
+     "list cheaply, fetch one thing's bars lazily" split as the personal library's own
+     `library`/`getSongBars` — a post's individual songs preview inline via a new
+     `communityChordCharts.getSongBars` (one song's bars, fetched only for whichever row is
+     currently expanded). Net effect: no operation in this whole feature ever has to hold more
+     than *one song's* `bars` in memory or in a single value at once, so post size no longer has
+     any practical ceiling tied to Convex's per-document or per-object-field limits —
+     `MAX_SONGS_PER_POST` is still a cap (now 3,000, a generous sanity bound rather than a
+     size-driven one) purely to keep one `create`/`importIntoLibrary` call's transaction from
+     growing unbounded, not because a bigger post would break storage.
+
+  Both `create` and `importIntoLibrary` were spot-verified against the real dev deployment (not
+  just `tsc`): an unauthenticated call is correctly rejected, and — since the previous failure was
+  specifically about a *shape* of return value (an object with too many fields), not overall
+  payload size — a separate temporary query confirmed a 1,500-element *array* return succeeds with
+  no comparable limit, which is the shape `get`'s song list now actually uses.
+
+  **Posting requires the caller's own profile to be `isPublic`** (checked server-side in `create`,
+  the real source of truth — the UI mirrors it by showing a "make your profile public" prompt
+  instead of a Post button when it isn't) — **browsing only requires being signed in**, not a
+  public profile of your own. Every read (`list`/`get`/`getSongBars`) drops a post (or song) whose
+  author's profile isn't (or is no longer) public, the same privacy rule applied everywhere else
+  cross-user data is read in this app, and `convex/account.ts`'s `performDelete` cascades both the
+  post rows and their now-separate song rows, so deleting your account doesn't leave posts (or
+  orphaned song rows) behind with no reachable author. The browse list (`list`) stays
+  metadata-only (title, description, `songCount`, the author's *current* username/avatar).
+  Posting (`CreatePostModal`) doesn't accept a pasted iReal link directly — it picks one or more
+  songs out of the caller's *own* Chord Charts library, so there's exactly one place (the Chord
+  Charts tool itself) that ever parses iReal links. That picker is grouped by playlist (the same
+  grouping the tool's own "Tunes" panel shows) rather than one long flat checkbox list, per a
+  direct follow-up request ("a better interface for selecting what charts to include... let me
+  include entire playlists"): each playlist has its own tri-state checkbox (unchecked/checked/
+  indeterminate, using the checkbox DOM node's `.indeterminate` property via a ref callback —
+  there's no HTML attribute for it) that selects or clears every song in that playlist at once,
+  alongside per-song checkboxes, and a collapse chevron per playlist. Picking a whole playlist as
+  the very first selection defaults the post title to that playlist's name — a starting
+  suggestion, never overwriting a title already typed. Viewing a post lets each song expand inline
+  into the real `ChordChart` renderer before deciding to import it (lazily fetching just that
+  song's bars via `getSongBars`), plus an "Import all" shortcut for the whole post — both call
+  `importIntoLibrary` directly, so importing a chart you already have (from Community or anywhere
+  else) is always a safe no-op rather than a duplicate, and lands in a playlist named after the
+  post.
 - **Community tunes** (`components/CommunityTunes.tsx`, `convex/communityTunes.ts`) — the Community
   page's fourth section, added right after Chord Charts per a direct follow-up ("there should be
   another section for posting tunes") and built as its sibling in every way: same shape, same
@@ -456,6 +626,82 @@ what exists, what's next, and the honest state of what's been verified.
   second copy of that logic to maintain. Capped at 300 tunes per post (`MAX_TUNES_PER_POST`) —
   higher than Chord Charts' 100, since a tune here is a few small fields, not a full parsed bar
   list, so many more of them fit comfortably under the same practical per-document-size concern.
+- **"My Posts" and posts on a public profile** — two direct follow-up requests landed together
+  since they're the same underlying gap: `list`'s shared Browse feed is capped at the 60 most
+  recent posts across *everyone*, so your own older post could silently fall out of view with no
+  way to find it again once enough other people had posted more recently, and there was no way at
+  all to see what someone *else* had posted from their profile page. Two new queries per Community
+  table (`communityChordCharts.ts`/`communityTunes.ts`), both scoped by the `by_user` index rather
+  than `by_createdAt`, so neither is capped the way `list` is:
+  - `mine` — every post the signed-in caller has posted, full stop, no `isPublic` filter (it's
+    your own data; deleting already worked this way too, scoped purely by ownership). Drives a new
+    Browse/My Posts toggle (a plain two-button pill, `view` state) in both `CommunityChordCharts.tsx`
+    and `CommunityTunes.tsx` — switches which query's results the shared list renders, reusing the
+    exact same row component either way (`PostListItem`, pulled out of each file's own top-level
+    component specifically so Browse/My Posts/a profile's posts section all render a post
+    identically — see below).
+  - `listByUser(userId)` — a specific user's posts, for a public profile's own "Chord Chart Posts"/
+    "Tune Posts" sections (`PublicProfilePage.tsx`). Same signed-in-required rule as `list`/`mine`
+    (browsing needs an account, even someone else's posts, per Jack's existing scoping call for
+    this feature) *plus* the target's profile has to currently be `isPublic` — re-checked
+    independently here rather than trusted from the caller, even though `PublicProfilePage.tsx`
+    only ever calls this once `getPublicByUsername` has already confirmed it, same "don't trust the
+    caller, the query is the real gate" pattern every other cross-user read in this app follows.
+  `PostListItem` and `PostDetailModal` are now exported from each Community component file
+  (`export function`, not a second copy) and imported into `PublicProfilePage.tsx` aliased per
+  source (`ChordChartPostListItem`/`TunePostListItem` etc.) — a post reached from a profile page
+  opens in the *exact* same detail modal Community's own Browse/My Posts do, so viewing and
+  importing behave identically regardless of which page led you there.
+
+  Building this surfaced a real gap in the privacy rule itself: `get`/`getSongBars`/
+  `importIntoLibrary` (chord charts) and `get` (tunes) all used to hide a post from *everyone*,
+  including its own author, the moment that author's profile stopped being `isPublic` — meaning
+  "My Posts" could list a post its own owner then couldn't actually open. Fixed by adding an
+  owner bypass to each (`row.userId !== userId && !profile.isPublic`, rather than just
+  `!profile.isPublic`) — your own posts stay visible/manageable to you regardless of your current
+  profile visibility, the same way `remove` already worked (no `isPublic` check on it at all,
+  scoped purely by ownership); a private profile still hides your posts from *everyone else*,
+  which is the part the rule actually exists to protect.
+
+  Verified against the real dev deployment (not just `tsc`): `mine` and `listByUser` both
+  correctly return `[]` for an unauthenticated caller, including `listByUser` called with a real
+  existing public user's id (not just a not-found one) — confirming "browsing requires an
+  account" holds even when the target profile genuinely is public and exists. Not verified: any
+  of the actual UI — the Browse/My Posts toggle switching correctly, a profile's posts sections
+  rendering and opening the right modal, or the owner-bypass fix actually letting someone view
+  their own post after going private (this sandbox has no way to sign in as two different users,
+  post as one, go private, and confirm "My Posts" still opens for the owner). A direct follow-up
+  request added `max-h-96 overflow-y-auto` to all four of a profile's list sections (Tunes, Tunes
+  to Learn, Chord Chart Posts, Tune Posts) so a long one scrolls in place instead of pushing the
+  rest of the page down indefinitely — confirmed, separately, that "import each tune to my
+  account" was already covered by `PublicTuneList`'s existing `canAdd` prop on the Tunes/Tunes to
+  Learn sections (per-tune Add/Learn buttons), not something that needed building. A further
+  follow-up restyled `PostListItem` itself (shared by Browse, My Posts, and a profile's posts
+  sections in both files) from a stacked card — title/meta, then a flat rectangular "View &
+  import"/"View & add" button on its own line below — into a single horizontal row: title/
+  description/meta on the left, a delete icon (when `onDelete` is passed) and a solid `bg-accent`
+  "View" pill on the right, both vertically centered against the row via the `<li>`'s own
+  `items-center`. `bg-accent` reads as blue by design here (`app/globals.css`'s `--accent`,
+  `#6366f1`/`#818cf8` light/dark) — the same token every other primary action button in this app
+  already uses (`Post a chart`, `Import all`, ...), not a one-off color picked for this button.
+  A further follow-up request added search to both Community list views (Browse and My Posts,
+  same input/filter in both files) — typing filters by the post's own title *or* any individual
+  song/tune name inside it, not just the title. Chord charts needed a small schema addition —
+  `communityChordCharts.songTitles: v.optional(v.array(v.string()))`, accumulated once in
+  `create` alongside `songCount` — since a post's individual song names otherwise only exist
+  inside `communityChordChartSongs` rows, which `list`/`mine` deliberately never read (the same
+  cost `getSongsBars` blew up over — see the two-Convex-bug section below); denormalizing just the
+  titles onto the post row keeps search free at read time without re-introducing that cost. Tunes
+  needed no schema change at all: a tune post's `tunes` field is already inline `v.any()` on the
+  row (small, capped at `MAX_TUNES_PER_POST`), so `communityTunes.ts`'s new `tuneNamesOf` helper
+  just derives names from it defensively on every read instead of storing them separately. Both
+  `summarizePost` functions now return the name list, and each file's top-level component filters
+  its visible list client-side with a case-insensitive substring match against title-or-any-name,
+  via a `useMemo` keyed off the trimmed/lowercased query. A `SearchIcon` + `<input type="search">`
+  row (same shape used elsewhere in this app) sits above the list, only shown once there's
+  something to search; the empty state distinguishes "no posts match your search" from "nobody's
+  posted here yet". Verified with `tsc`, `eslint`, and `next build`; not verified by actually
+  typing into the box in a browser, same caveat as everything else in Community this session.
 - **Home** (`app/page.tsx` / `components/Home.tsx`) — an actual landing page, not a tool directory.
   Went through two very different designs this session: the first rendered every `NAV_LINKS` entry
   as an icon-card grid, grouped by category via the sidebar/command palette's own `groupByCategory`
@@ -1182,24 +1428,37 @@ from something that used to work:
   without failing the whole list) against synthetic Node scripts, and that the whole feature —
   schema, every new Convex function, every new page — type-checks and deploys cleanly to the dev
   backend.
-- **Community chord charts** (see its own paragraph under Backend (Convex) above): also entirely
-  unclicked — this sandbox can't create two signed-in sessions to post from one account and browse/
-  import from another. Specifically unverified: that `create` actually refuses posting for a
-  non-public profile and the client-side prompt matches; that `list`/`get` really do drop a post
-  once its author's profile goes private (not just that the query code reads that way); that
-  `CreatePostModal`'s checkbox picker actually produces a correct snapshot (no silent field loss
-  converting a library `StoredSong` down to a plain `IRealSong`); that the inline `ChordChart`
-  preview inside `PostDetailModal` renders correctly in that narrower modal context (same component
-  as the tool page, but a different container width/`container-type` context it's never been
-  rendered inside before); that "Import all" and a per-song "Import" actually land in
-  `ChordCharts.tsx`'s own library and show up there immediately (same `syncedSettings` key, but
-  never watched live across two mounted components in a real browser); and the account-deletion
-  cascade now also clearing `communityChordCharts` rows. Verified so far, purely at the level of
-  `tsc`/`eslint`/`next build` passing and `npx convex dev --once` deploying the new
-  `communityChordCharts` table and functions cleanly to the dev backend — no synthetic script was
-  run against this one specifically (unlike `resolvePublicTunes`/`username.ts` above), since its
-  logic is thin enough (mostly Convex reads/writes plus the already-tested `mergeSongs`) that there
-  wasn't a clear gap a Node script would catch that type-checking wouldn't.
+- **Community chord charts** (see its own paragraph under Backend (Convex) above — now on its
+  third storage design, the first two both having broken for real at actual posting scale, most
+  recently a ~1,400-song post): partially clicked through by Jack himself (that's how both prior
+  bugs were actually found — this sandbox still can't authenticate as a real user, so every fix
+  here has been verified against the *architecture*, via the real dev deployment, not by clicking
+  the UI). Specifically unverified: that `create`/`importIntoLibrary` actually succeed end to end
+  for a genuinely large post now (the original ask) — verified so far only that the specific
+  failure modes that broke v1 (a >1 MiB document) and v2 (a >1024-field object) no longer apply
+  architecturally, via a real query/mutation reachability check and a dedicated large-array-return
+  check against the live dev deployment (see the Backend section), not by actually posting 1,400
+  real charts and confirming they show up correctly; that `create` actually refuses posting for a
+  non-public profile and the client-side prompt matches; that `list`/`get`/`getSongBars` really do
+  drop a post (or song) once its author's profile goes private; that the inline `ChordChart`
+  preview inside `PostDetailModal` renders correctly once its now-lazy `getSongBars` fetch
+  resolves, in that narrower modal context; that "Import all" and a per-song "Import" actually
+  land in `ChordCharts.tsx`'s own library and show up there immediately; and the account-deletion
+  cascade now also clearing `communityChordCharts` *and* `communityChordChartSongs` rows. Also
+  unverified: whether a playlist's tri-state checkbox (`.indeterminate` set imperatively via a ref
+  callback) actually renders the indeterminate dash in every browser rather than just
+  checked/unchecked; whether the title-autofill-from-playlist-name behavior feels helpful or
+  surprising in practice; and whether search correctly hides a playlist with zero matching songs.
+  Verified so far: `tsc`/`eslint`/`next build` all pass; `npx convex dev --once` deploys the
+  current three-table shape (`communityChordCharts`/`communityChordChartSongs`, alongside the
+  personal library's own `chordChartPlaylists`/`chordChartSongs`/`chordChartSongBars`) cleanly;
+  and, against the real dev backend specifically (not a mock), both `create` and
+  `importIntoLibrary` correctly reject an unauthenticated caller, and a large (1,500-element) array
+  return value — the shape `get`'s song list now uses — succeeds with no limit comparable to the
+  one that broke the old object-keyed-by-id bulk fetch. No synthetic Node script was run against
+  the dedupe/playlist logic specifically here, since it's now shared with the already-scripted
+  `mergeIntoLibrary`/`chordCharts.importSongs` path via `convex/lib/chordCharts.ts`'s
+  `findOrCreatePlaylist`/`songKey`, not a second independent implementation to separately verify.
 - **Community tunes** (see its own paragraph under Backend (Convex) above): same story, also
   entirely unclicked. Specifically unverified, beyond everything already listed for Community
   chord charts (the same posting-gate/privacy-filter/account-deletion-cascade concerns apply here
@@ -1329,6 +1588,197 @@ from something that used to work:
   browser to actually render in (Playwright's Chromium is missing OS shared libraries — e.g.
   `libnss3.so`, `libgtk` — and installing them needs `sudo`, which isn't available
   non-interactively here); `next build`/`tsc`/`eslint` are all it's been checked with.
+  Same-unverified-for-the-same-reason applies to a later visual pass matching iReal Pro's/Finale's
+  chart look more closely, per two rounds of direct follow-up with reference screenshots. Round
+  one swapped the chord font from Oswald (a condensed sans, a rough stand-in from when this was
+  first built) to Bevan (a bold slab serif) and added a stacked time signature, baseline-aligned
+  quality suffix, and an always-thick opening barline — sent back as "not even close... the font
+  you just used is horrible... it should be very thin," naming Finale's own "Jazz Text" font as
+  the actual reference. Round two (the current state): the font is now EB Garamond — genuinely
+  thin-stroked, the opposite of Bevan, and the closest freely-licensed stand-in for Jazz Text
+  available via `next/font/google` (Jazz Text itself is bundled with Finale, not distributable for
+  web use, so this remains an approximation, not a claim of an exact match — the same honest
+  caveat as the first attempt, just aimed at a different reference font this time). More
+  consequentially, round two also replaced the chart's entire sizing model: it used to size chord
+  text off the container's *width* only (a `cqw`-based scheme), so a long chart (many rows) just
+  ran taller than its box and needed a scrollbar — exactly what "the whole chart, regardless of
+  length, should be able to fit without scrolling" was asking to fix. Now the chart renders inside
+  a single fixed-aspect-ratio box (`aspect-[8.5/11]`, "almost" a sheet of paper, per that same
+  request) at one natural (unscaled) size, and a new `PageFit` component measures the whole
+  rendered result (`ResizeObserver` + `scrollWidth`/`scrollHeight`, the same "measure then
+  `transform: scale()`" idea `FitChordRow` already used for a single bar, now applied to the
+  *entire* chart) and applies one uniform scale so it always fits inside that page — shrinking a
+  long chart down, or growing a short one up (capped at `MAX_SCALE`, so a 4-bar tune doesn't blow
+  up absurdly large). Every row now always renders exactly `barsPerRow` fixed-width columns
+  (`COL_WIDTH`), even a short trailing row, leaving the remainder blank rather than stretching —
+  matching how a real chart never changes bar width mid-line just because a line ends early. None
+  of this has been seen rendered: not whether EB Garamond actually reads as close to Jazz Text, not
+  whether `Δ`/`ø`/`°` (outside EB Garamond's coverage too — an existing limitation carried over
+  from both earlier fonts, not a new regression) fall back jarringly, not whether the scale-to-fit
+  math actually keeps a very long real chart legible rather than shrinking it into illegibly tiny
+  text, and not whether the page's own on-screen size (`max-w-2xl` × the 8.5:11 ratio, comfortably
+  taller than it is wide) ends up needing the *page itself* to scroll on a shorter viewport even
+  though the *chart content* inside it never does — those are two different things, and only the
+  second was ever actually promised here.
+
+  Two further direct follow-ups landed on top of this, both also unclicked for the same reason.
+  First, the page's own side margins on mobile — both `ChordCharts.tsx`'s display wrapper
+  (`p-4 sm:p-6` → `px-1 py-4 sm:p-6`) and `PageFit`'s own inset (`inset-4 sm:inset-6` →
+  `inset-x-1 inset-y-4 sm:inset-6`) — shrank to near-zero horizontally below the `sm:` breakpoint,
+  deliberately left untouched above it, and deliberately *not* touching `ToolLayout.tsx`'s own
+  shared `px-4` page gutter (used by every "stacked"-layout tool, not just this one) — so there's
+  still a small unavoidable gutter from that shared layer, not literally edge-to-edge. Second, a
+  "maximize" toggle (`MaximizeIcon`/`MinimizeIcon`, new in `components/tools.tsx`) opens the
+  selected chart in a `fixed inset-0` full-screen overlay (Escape, or a "minimize" button, to
+  close) — a plain CSS overlay rather than the browser's native Fullscreen API, deliberately: iOS
+  Safari doesn't support calling `requestFullscreen()` on an arbitrary element at all, which would
+  have made the button silently do nothing on an iPhone specifically, a bad outcome for what's
+  otherwise a mobile-first practice tool. `ChordChart` itself gained a `fullscreen` prop that drops
+  the paper aspect-ratio/width-cap in favor of filling whatever box it's given — maximizing is
+  about legibility while practicing, not preserving a page shape that would waste space on a
+  landscape phone — while still routing through the same `PageFit` scale-to-fit logic either way,
+  so "never needs to scroll" holds in both the normal and maximized views.
+
+  Two more direct follow-ups after that, both also unclicked. First, maximized, the composer name
+  used to sit flush right in the header (`justify-between`) — colliding with the "minimize"
+  button that sits top-right of the full-screen overlay, per a reported screenshot of "Coleman
+  Haw[kins]" overlapping it. Fixed by moving the composer down under the title (left-aligned) only
+  when `fullscreen`; the normal (non-maximized) view, which has no button there to collide with,
+  keeps the composer flush right as before. Second, and more substantial: a long chart (many rows)
+  in the *normal* (non-maximized) view rendered at a fraction of the phone screen's actual width,
+  with wasted margin on both sides — `PageFit` had been fitting *both* width and height inside the
+  fixed `aspect-[8.5/11]` page box, so a tall chart's height became the binding constraint on the
+  scale, and that same (small) scale then applied to width too, shrinking it far more than the
+  screen actually required. `PageFit` now takes a `fitHeight` prop: `true` (the full-screen case,
+  a genuinely fixed box with no page below it to grow into) keeps fitting both dimensions exactly
+  as before; `false` (the new default, normal in-page case) fits *width only* — always scales to
+  exactly fill the container's width — and instead reports the resulting scaled *height* back onto
+  its own box (`content.scrollHeight * scale`, via a second piece of state), so the page itself
+  simply grows taller for a longer chart rather than the whole chart shrinking to preserve a paper
+  ratio that was never the point — normal page scroll below a tall chart is fine; the chart
+  needing its own internal scrollbar, which this whole `PageFit` mechanism exists to prevent, is
+  the thing that was actually promised. Setting the box's own height from inside the same
+  `ResizeObserver` callback that watches that box does cause one extra, harmless observer firing
+  per settle (the box's height changing is itself a resize) — verified by tracing it through, not
+  by watching it run: the second pass recomputes from the *same* `content` natural size (unaffected
+  by the box's own height, since `content` is absolutely positioned) and lands on the identical
+  scale/height values, so React bails out of re-rendering and it settles after that one bounce
+  rather than looping.
+
+  **Round three**, a direct follow-up asking for "a handwritten jazz font like lilyjazz": swapped
+  EB Garamond for `lilyjazz-text`, the hand-written text face from the [LilyJAZZ font
+  family](https://github.com/OpenLilyPondFonts/lilyjazz) (SIL Open Font License 1.1, copyright
+  Abraham Lee) — this app's first actually-bundled font, self-hosted via `next/font/local` rather
+  than fetched from Google Fonts. Immediately correctable on two points, both from a direct
+  follow-up: **first**, `lilyjazz-text`'s own glyph set was missing three of `prettyQuality`'s five
+  substitution characters (`Δ`, `♯`, `♭` — only `ø`/`°` were covered), pointed out directly
+  ("the font shuold have flats and stuff"); **second**, there's no lighter weight of
+  `lilyjazz-text` to switch to for "make the font thinner." Both together were reason enough to
+  replace it outright rather than patch around the gaps.
+
+  **Round four** (the current state) swapped in [Petaluma](https://github.com/steinbergmedia/petaluma)
+  instead, per a direct follow-up naming it specifically: "its open source and definately includes
+  everything." Petaluma is the SMuFL-compliant notation font family Steinberg built for its Dorico
+  scoring software (SIL Open Font License 1.1, copyright Steinberg Media Technologies GmbH) — and
+  genuinely does include everything needed, once the right *two* of its three faces are actually
+  used together rather than just one:
+  - **`PetalumaScript`** — a hand-inked text face, used for root letters, digits, and most of the
+    quality suffix (`chordFont` in `ChordChart.tsx`). Its cmap was checked directly (`opentype.js`
+    against the real downloaded `.otf`, the same verification method used for every font swap in
+    this file, not assumed from the family's README) and — unlike `lilyjazz-text` — it already
+    covers `♯`/`♭`/`ø` (three of `prettyQuality`'s five substitution glyphs) at their normal
+    Unicode codepoints directly, no second font needed for those.
+  - **`Petaluma`** itself (the engraving/symbol face, `chordSymbolFont`) — used for exactly the
+    remaining two: `Δ` (major 7) and `°` (diminished). Rather than falling back to whatever other
+    font happens to be installed for those two (the gap every earlier font in this chart's history
+    had), a new `QualityText` component in `ChordChart.tsx` intercepts just those two characters
+    after `prettyQuality` and re-renders them through `Petaluma`'s own dedicated SMuFL "chord
+    symbols" glyph range — `csymMajorSeventh` (U+E873) and `csymDiminished` (U+E870), purpose-built
+    engraved jazz-chord marks, not a Greek letter or degree sign standing in for them. Confirmed to
+    exist in the actual font (not assumed from the SMuFL spec alone) by cross-referencing the
+    [SMuFL glyphnames registry](https://github.com/w3c/smufl)'s `csym*` codepoints against
+    Petaluma's real cmap. `prettyQuality` itself (`lib/iRealPro.ts`) is completely untouched — still
+    the same Δ/ø/°/♯/♭ substitution shared with Guess the Chord's own chord bank — so this is a
+    `ChordChart.tsx`-local addition on top of it, not a change to shared logic; Guess the Chord
+    keeps rendering those same five characters in whatever ordinary font it already uses, unaffected.
+
+  Both `.otf` files (`components/fonts/petaluma/Petaluma.otf`, `PetalumaScript.otf`, plus the
+  family's shared `OFL.txt`/`FONTLOG.txt`) are committed the same way `lilyjazz-text` was, replacing
+  it outright — `components/fonts/lilyjazz-text/` was deleted, not left alongside as dead weight.
+  `/credits`' "Typeface" section was rewritten to credit Petaluma/Steinberg instead. On "make the
+  font thinner" specifically: `PetalumaScript` reads as a visibly lighter weight than `lilyjazz-text`
+  on paper, which happens to land closer to what was asked for, but that's a side effect of picking
+  a different single-weight font, not an adjustable setting — the Petaluma family ships only one cut
+  of `PetalumaScript`, so if it still reads too heavy once actually seen rendered, there's no lighter
+  variant within this family to fall back to; a non-variable OTF's own stroke weight can't be thinned
+  further through CSS `font-weight` the way a variable font's could. `tsc`, `eslint`, and `next build`
+  all pass, and a synthetic Node script (run directly against the real `prettyQuality` plus
+  `QualityText`'s own substitution table, not a mock) confirms the character-level logic against real
+  quality suffixes pulled from `lib/chords.ts`: `^7`/`^13`/`o7`/`o` correctly isolate `Δ`/`°` for the
+  SMuFL substitution, while `h7`/`-7b5`/`7#9`/`sus` correctly need no substitution at all (their
+  `ø`/`♭`/`♯` already render through `PetalumaScript` directly). **Not verified**, same as every
+  round before it: how any of this actually looks rendered in a browser — whether `PetalumaScript`
+  reads as legible hand-written jazz notation at chord-chart sizes, whether it's visibly thin enough
+  to satisfy the original ask, and whether the two `Petaluma`-rendered SMuFL glyphs sit at a
+  consistent size/baseline next to `PetalumaScript`'s own text (both fonts share the same
+  1000-units-per-em design, so no manual scale correction was applied — checked via each font's own
+  metrics, but genuinely unconfirmed by eye).
+
+  **Round five**, a direct follow-up with a screenshot of the actual rendered chart: chord symbols
+  themselves were correctly in the new font, but the "%" repeat-bar mark and the coda symbol
+  (segno wasn't in the screenshot, but shares the exact same code path) were still visibly in a
+  plain system font, unchanged by any of the rounds above — both were typed as plain Unicode
+  characters (`%`, `⊕`, `𝄋`) with no `chordFont`/`chordSymbolFont` class applied at all, simply
+  missed when the font swap first went in. Rather than just adding `chordFont`'s class to those
+  same plain characters, this checked whether `Petaluma` (the SMuFL engraving face, already
+  bundled for `QualityText`'s `Δ`/`°`) has real dedicated glyphs for these too — cross-referencing
+  the SMuFL glyphnames registry again, then confirming directly against the actual bundled
+  `Petaluma.otf`'s cmap: it does, `repeat1Bar` (U+E500), `coda` (U+E048), and `segno` (U+E047),
+  proper engraved marks rather than a percent sign/circled-plus/musical-repeat-character standing
+  in for them (`PetalumaScript`, the text face, has none of the three — confirmed the same way —
+  so this is `chordSymbolFont` only, not a choice between the two faces). `BarContent`'s repeat
+  case and `BarCell`'s segno/coda span now render those three codepoints through
+  `chordSymbolFont.className` instead of the old plain-Unicode characters; `REPEAT_SIZE`/
+  `SYMBOL_SIZE` (the same font-size constants each already used) were left as-is rather than
+  guessed at anew. `repeat1Bar`'s own bounding box sits mostly *below* the font's baseline
+  (`y1: -250, y2: 175` in its 1000-unit em, versus a typed `%`'s more ordinary above-baseline
+  shape) — flagged here as a real, not-yet-visually-confirmed risk: normal flex-centering in
+  `BarCell` should still land it roughly centered in the bar regardless, since that's centering the
+  span's line box rather than reasoning about glyph-specific bbox position, but it's worth a second
+  look once this is actually seen rendered, before assuming that math holds. `tsc`, `eslint`, and
+  `next build` all pass, and all three codepoints were confirmed present in the real bundled
+  `Petaluma.otf` (not assumed from the SMuFL spec). **Not verified**, same as everything else in
+  this chart's font history: how the repeat mark, coda, and segno actually look and sit once
+  rendered — including that vertical-centering question above.
+- Chord Charts' playlist grouping (`lib/chordChartsLibrary.ts`'s `Library`/`Playlist`,
+  `PlaylistSection` in `ChordCharts.tsx` — see that tool's own bullet above): the merge/resolve/
+  delete logic itself is covered by a synthetic Node script (creating vs. merging into an existing
+  playlist by name, a duplicate song skipped correctly even in a brand-new playlist, every song
+  accounted for exactly once, the legacy-library-falls-into-"Unsorted" case, and an emptied
+  playlist being dropped), but nothing about the actual UI has been clicked through: whether the
+  expand/collapse chevrons work and animate sensibly, whether a playlist containing the selected
+  song really does show expanded by default without needing a manual click, whether the nested
+  indentation reads clearly at the sidebar's narrow width, and — genuinely unknown, not just
+  unclicked — how an account with chord charts imported *before* this change actually looks the
+  first time it loads under the new "Unsorted" bucket, since this sandbox has no way to seed a real
+  pre-existing synced library to check that against.
+- Chord Charts' Convex-backed library (`lib/useChordChartsLibrary.ts`, `convex/chordCharts.ts` —
+  see the tool's own bullet above for why this exists: the old single-blob storage broke on a real
+  "massive playlist" import). Verified so far: the deployed functions are correctly wired and
+  behave as expected when called *unauthenticated* (a plain Node script against the real dev
+  backend, not a mock), and the signed-out/local code path is provably unchanged (same functions,
+  same synthetic-script coverage, as before this session). **Not** verified: an actual signed-in
+  import of a large playlist succeeding where it used to fail — this sandbox can't authenticate as
+  a real user, so the one thing that actually matters most here (does Jack's original "massive
+  playlist" import now work) is unconfirmed by anything stronger than the architecture no longer
+  having the specific failure mode that caused it. Also unverified: the one-time
+  `migrateFromSyncedSettings` migration actually preserving a real pre-existing library's playlists
+  and songs correctly (only reasoned through, never run against real data — this sandbox has
+  nothing to migrate); whether `getSongBars`' lazy per-song fetch introduces a noticeable delay
+  switching between tunes in a real browser (the `selectedSongLoading` spinner is new and unclicked
+  the way everything else visual here is); and whether `CreatePostModal`'s bulk `getSongsBars`
+  fetch at submit time (via `useConvex().query`, not `useQuery`) actually returns bars keyed
+  correctly by song id in practice, not just by reading the handler's code.
 
 ## Environment quirk (may not apply on a different machine)
 

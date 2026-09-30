@@ -9,13 +9,89 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import PublicTuneList from "@/components/PublicTuneList";
 import UserAvatar from "@/components/UserAvatar";
-import { PlusIcon, TrashIcon } from "@/components/tools";
+import { PlusIcon, SearchIcon, TrashIcon } from "@/components/tools";
 import { toPublicTune } from "@/lib/profileTunes";
 import { Tune } from "@/lib/types";
 import { useSyncedTunes } from "@/lib/useSyncedTunes";
 
 function formatDate(ms: number) {
   return new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+export type TunePostSummary = {
+  id: Id<"communityTunes">;
+  title: string;
+  description: string;
+  tuneCount: number;
+  tuneNames: string[];
+  createdAt: number;
+  authorUsername?: string | null;
+  authorAvatarUrl?: string | null;
+};
+
+/** One post's row — the tune-post twin of `CommunityChordCharts.tsx`'s `PostListItem`, same
+    shape/reasoning/layout (title/description/meta on the left, delete icon and a solid accent
+    "View" pill on the right, vertically centered), exported so `PublicProfilePage.tsx` renders
+    posts identically to Community itself. */
+export function PostListItem({
+  post,
+  onOpen,
+  onDelete,
+}: {
+  post: TunePostSummary;
+  onOpen: () => void;
+  onDelete?: () => void;
+}) {
+  return (
+    <li className="flex items-center gap-3 rounded-xl bg-surface p-4 text-left">
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-semibold">{post.title}</p>
+        {post.description && (
+          <p className="mt-0.5 line-clamp-2 text-sm text-muted">{post.description}</p>
+        )}
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
+          {post.authorUsername && (
+            <>
+              <Link
+                href={`/u/${post.authorUsername}`}
+                className="flex items-center gap-1.5 hover:text-foreground"
+              >
+                <UserAvatar url={post.authorAvatarUrl ?? null} size="sm" />
+                {post.authorUsername}
+              </Link>
+              <span aria-hidden>·</span>
+            </>
+          )}
+          <span>
+            {post.tuneCount} tune{post.tuneCount === 1 ? "" : "s"}
+          </span>
+          <span aria-hidden>·</span>
+          <span>{formatDate(post.createdAt)}</span>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1.5">
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            aria-label="Delete post"
+            title="Delete post"
+            className="rounded-lg p-1.5 text-muted hover:bg-background hover:text-danger"
+          >
+            <TrashIcon className="h-4 w-4" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onOpen}
+          className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground hover:bg-accent-hover"
+        >
+          View
+        </button>
+      </div>
+    </li>
+  );
 }
 
 /** The Community page's "Tunes" section (`Community.tsx`'s fourth view) — the tune-list sibling of
@@ -25,18 +101,33 @@ function formatDate(ms: number) {
     charts section. A post's tune list renders with `PublicTuneList` — the exact same component a
     public profile's own Tunes section uses — so "add"/"learn" here behaves identically (same
     dedupe-by-name check, same fresh-id copy, same two buttons) instead of a second copy of that
-    logic. */
+    logic. Same Browse/My Posts toggle as the chord-charts section, and for the same reason: `list`
+    is capped at the 60 most recent posts across everyone, so `mine` (uncapped, scoped to the
+    caller) is the only reliable way to find your own older posts again. */
 export default function CommunityTunes() {
   const profile = useQuery(api.profiles.getMine);
+  const [view, setView] = useState<"browse" | "mine">("browse");
   const posts = useQuery(api.communityTunes.list);
+  const minePosts = useQuery(api.communityTunes.mine);
   const removePost = useMutation(api.communityTunes.remove);
   const [myTunes] = useSyncedTunes();
 
   const [showCreate, setShowCreate] = useState(false);
   const [openPostId, setOpenPostId] = useState<Id<"communityTunes"> | null>(null);
   const [deletingId, setDeletingId] = useState<Id<"communityTunes"> | null>(null);
+  const [query, setQuery] = useState("");
 
   const canPost = profile?.isPublic === true;
+  const visiblePosts = view === "browse" ? posts : minePosts;
+  const q = query.trim().toLowerCase();
+  const filteredPosts = useMemo(() => {
+    if (!visiblePosts || !q) return visiblePosts;
+    return visiblePosts.filter(
+      (post) =>
+        post.title.toLowerCase().includes(q) ||
+        post.tuneNames.some((name) => name.toLowerCase().includes(q)),
+    );
+  }, [visiblePosts, q]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -65,64 +156,66 @@ export default function CommunityTunes() {
           ))}
       </div>
 
-      {posts === undefined ? (
+      <div className="flex gap-1 self-start rounded-lg bg-surface p-1">
+        <button
+          type="button"
+          onClick={() => setView("browse")}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            view === "browse" ? "bg-accent text-accent-foreground" : "text-muted hover:text-foreground"
+          }`}
+        >
+          Browse
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("mine")}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            view === "mine" ? "bg-accent text-accent-foreground" : "text-muted hover:text-foreground"
+          }`}
+        >
+          My Posts{minePosts && minePosts.length > 0 ? ` (${minePosts.length})` : ""}
+        </button>
+      </div>
+
+      {visiblePosts && visiblePosts.length > 0 && (
+        <label className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-accent">
+          <SearchIcon className="h-4 w-4 shrink-0 text-muted" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by post title or tune name…"
+            aria-label="Search tune posts"
+            className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted"
+          />
+        </label>
+      )}
+
+      {filteredPosts === undefined ? (
         <div className="flex justify-center py-8">
           <LoadingSpinner />
         </div>
-      ) : posts.length === 0 ? (
+      ) : filteredPosts.length === 0 ? (
         <p className="rounded-2xl bg-surface p-5 text-center text-sm text-muted">
-          Nobody&apos;s posted a tune yet — be the first.
+          {q
+            ? `No posts match "${query}".`
+            : view === "browse"
+              ? "Nobody's posted a tune yet — be the first."
+              : "You haven't posted a tune yet."}
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {posts.map((post) => (
-            <li key={post.id} className="flex flex-col gap-2 rounded-xl bg-surface p-4 text-left">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold">{post.title}</p>
-                  {post.description && (
-                    <p className="mt-0.5 line-clamp-2 text-sm text-muted">{post.description}</p>
-                  )}
-                </div>
-                {post.isMine && (
-                  <button
-                    type="button"
-                    onClick={() => setDeletingId(post.id)}
-                    aria-label="Delete post"
-                    title="Delete post"
-                    className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-danger"
-                  >
-                    <TrashIcon className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                {post.authorUsername && (
-                  <Link
-                    href={`/u/${post.authorUsername}`}
-                    className="flex items-center gap-1.5 hover:text-foreground"
-                  >
-                    <UserAvatar url={post.authorAvatarUrl} size="sm" />
-                    {post.authorUsername}
-                  </Link>
-                )}
-                <span aria-hidden>·</span>
-                <span>
-                  {post.tuneCount} tune{post.tuneCount === 1 ? "" : "s"}
-                </span>
-                <span aria-hidden>·</span>
-                <span>{formatDate(post.createdAt)}</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setOpenPostId(post.id)}
-                className="self-start rounded-lg bg-background px-3 py-1.5 text-sm font-medium hover:bg-surface-hover"
-              >
-                View &amp; add
-              </button>
-            </li>
+          {filteredPosts.map((post) => (
+            <PostListItem
+              key={post.id}
+              post={post}
+              onOpen={() => setOpenPostId(post.id)}
+              onDelete={
+                view === "mine" || ("isMine" in post && post.isMine)
+                  ? () => setDeletingId(post.id)
+                  : undefined
+              }
+            />
           ))}
         </ul>
       )}
@@ -305,8 +398,9 @@ function CreatePostModal({
 /** A single post's full tune list, fetched lazily (`communityTunes.get`, only queried once this
     modal actually mounts) and rendered with `PublicTuneList` — the same read-only-plus-add/learn
     list a public profile's own Tunes section uses, so adding from a Community post behaves
-    identically to adding from someone's profile page. */
-function PostDetailModal({ id, onClose }: { id: Id<"communityTunes">; onClose: () => void }) {
+    identically to adding from someone's profile page. Exported so `PublicProfilePage.tsx` can
+    open the exact same detail view for a post reached from a profile's own "Tunes" posts section. */
+export function PostDetailModal({ id, onClose }: { id: Id<"communityTunes">; onClose: () => void }) {
   const post = useQuery(api.communityTunes.get, { id });
 
   return (

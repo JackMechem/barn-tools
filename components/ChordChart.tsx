@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { Oswald } from "next/font/google";
+import localFont from "next/font/local";
 import {
   formatComposer,
   prettyQuality,
@@ -10,60 +10,134 @@ import {
   type IRealSong,
 } from "@/lib/iRealPro";
 
-// iReal Pro sets its chord symbols in a tall, narrow face so a big chord (with extensions and a
-// bass note) still fits a measure without crowding it — Oswald is a decent free stand-in for
-// that look. Loaded here (not the site-wide font list in app/fonts.ts) since it's specific to
-// this one chart display, not something to offer as a general site font.
-const chordFont = Oswald({ subsets: ["latin"], weight: ["400", "500"] });
+// The reference for this chart's look started as Finale's "Jazz Text" — a thin, plain jazz-chart
+// serif bundled with Finale (MakeMusic's notation software), not something available for web use —
+// approximated for a while with EB Garamond, then briefly with lilyjazz-text (the hand-written
+// text face from the LilyJAZZ font family), before landing here: Petaluma, the SMuFL-compliant
+// notation font family Steinberg built for Dorico. Two of its three faces are used together —
+// `PetalumaScript` (a genuinely hand-inked-looking text face — root letters, digits, and most of
+// the quality suffix) for everything `lilyjazz-text` was doing, plus `Petaluma` itself (the
+// engraving/symbol face) for exactly two characters neither `PetalumaScript` nor any plain-text
+// font actually has a real glyph for: a proper major-seventh triangle and a proper diminished
+// circle. Unlike Δ/° set in an ordinary font (lilyjazz-text's own gap, and EB Garamond's before
+// it), SMuFL fonts ship dedicated "chord symbol" glyphs purpose-built for exactly this — real
+// engraved jazz-chord marks, not Greek/math characters standing in for them — at their own
+// Private-Use-Area codepoints (`csymMajorSeventh` U+E873, `csymDiminished` U+E870; see
+// `QualityText` below). `PetalumaScript` already covers ♯/♭/ø directly at their normal Unicode
+// codepoints (confirmed by checking its actual cmap, not assumed), so `prettyQuality`'s existing
+// Δ/ø/°/♯/♭ substitution is untouched and still shared with Guess the Chord — only Δ and ° get
+// intercepted and re-rendered through the second face here, and only in this file. Licensed under
+// the SIL Open Font License 1.1, copyright Steinberg Media Technologies GmbH
+// (`components/fonts/petaluma/OFL.txt`), which permits exactly this bundling as long as the
+// license text travels with it and the reserved name "Petaluma" isn't reused for a modified
+// version; see `/credits` for the on-site attribution. Self-hosted via `next/font/local`
+// (colocated next to this component, not under `public/`, per Next's own recommended colocation
+// pattern) rather than `next/font/google`, since neither face is a Google Fonts entry. Both are
+// single static OTF faces, so neither needs a `weight`/`style` declared. Loaded here, not the
+// site-wide font list in app/fonts.ts, since it's specific to this one chart display.
+//
+// `PetalumaScript` reads as noticeably lighter-weight than lilyjazz-text on paper (thinner stroke
+// contrast is part of its own design, not a CSS adjustment) — the family ships only this one
+// weight of it, though, so there's no lighter cut to switch to if it still reads too heavy once
+// actually seen rendered; a non-variable OTF's stroke weight can't be thinned further through CSS
+// `font-weight` the way a variable font's could.
+const chordFont = localFont({ src: "./fonts/petaluma/PetalumaScript.otf" });
+// Only ever used for the two SMuFL chord-symbol glyphs `QualityText` substitutes in — never applied
+// to a whole chord label the way `chordFont` is.
+const chordSymbolFont = localFont({ src: "./fonts/petaluma/Petaluma.otf" });
 
-// Every size below is a function of one CSS variable, `--col`: the width of a single bar column,
-// which is itself `100cqw / --bars` (a container-query width, not a viewport width, divided by
-// however many bars are packed into a row). Bar columns are laid out as equal `1fr` shares of
-// whatever width the chart's container actually has, so a row can never be wider than its
-// container — there's nothing to overflow. As that container (or the bars-per-row setting)
-// shrinks, `--col` shrinks, and every clamp() below rides it down, so text shrinks to keep fitting
-// its column instead of forcing a scrollbar. The min/max in each clamp just keeps things from
-// going illegibly small or comically large at the extremes.
-function colSize(factor: number, min: string, max: string) {
-  return `clamp(${min}, calc(var(--col) * ${factor}), ${max})`;
+// The two `prettyQuality` substitution glyphs `PetalumaScript` doesn't have real glyphs for,
+// mapped to `Petaluma`'s own SMuFL "chord symbols" glyphs instead of falling back to whatever
+// other font happens to be installed. ♯/♭/ø aren't here because `PetalumaScript` already covers
+// those three directly — only Δ (major 7) and ° (diminished) need the second face.
+const SMUFL_CHORD_GLYPH: Record<string, string> = {
+  "Δ": "", // csymMajorSeventh
+  "°": "", // csymDiminished
+};
+
+/** `prettyQuality(quality)`, with `Δ`/`°` re-rendered through `chordSymbolFont`'s real SMuFL
+    glyphs instead of left in `chordFont` (which has no glyph for either, and would otherwise fall
+    back to the browser's own default font, the same way `lib/chords.ts`'s reuse of
+    `prettyQuality` for Guess the Chord already does and is expected to — that call site isn't set
+    in either Petaluma face, so it's untouched). Splits the string into individual characters
+    rather than one `replace()` pass so each can carry its own font — the common case (no
+    substitution needed at all) is still just the plain characters with no extra markup. */
+function QualityText({ quality }: { quality: string }) {
+  return (
+    <>
+      {[...prettyQuality(quality)].map((ch, i) => {
+        const glyph = SMUFL_CHORD_GLYPH[ch];
+        return glyph ? (
+          <span key={i} className={chordSymbolFont.className}>
+            {glyph}
+          </span>
+        ) : (
+          ch
+        );
+      })}
+    </>
+  );
 }
 
-const ROOT_SIZE = colSize(0.22, "1.5rem", "3.5rem");
-const ROOT_ACCIDENTAL_SIZE = colSize(0.11, "0.9rem", "1.75rem");
-const QUALITY_SIZE = colSize(0.18, "1.2rem", "2.75rem");
-const BASS_SIZE = colSize(0.11, "0.9rem", "1.75rem");
-const REPEAT_SIZE = colSize(0.2, "1.3rem", "3rem");
-const SYMBOL_SIZE = colSize(0.1, "1rem", "1.75rem");
-const SMALL_LABEL_SIZE = colSize(0.055, "0.65rem", "0.95rem");
-const BADGE_SIZE = colSize(0.05, "0.6rem", "0.85rem");
-const MIN_BAR_HEIGHT = colSize(0.68, "5.5rem", "9.5rem");
+// Natural (unscaled) sizes. Unlike the previous container-query (`cqw`) scheme — which only ever
+// solved *horizontal* fit, so a long chart (many rows) still just ran taller than its container
+// and had to scroll — everything below renders at one fixed size, and the whole chart is then
+// measured and uniformly scaled to fit inside a single page-shaped box (`PageFit`), however many
+// rows it takes. That's what actually answers "the whole chart, regardless of length, should fit
+// without scrolling."
+const COL_WIDTH = "7.5rem";
+const BAR_HEIGHT = "5.25rem";
+const ROOT_SIZE = "2.25rem";
+const ROOT_ACCIDENTAL_SIZE = "1.1rem";
+const QUALITY_SIZE = "1.4rem";
+const BASS_SIZE = "1.1rem";
+const REPEAT_SIZE = "1.75rem";
+const SYMBOL_SIZE = "1.1rem";
+const SMALL_LABEL_SIZE = "0.8rem";
+const BADGE_SIZE = "0.75rem";
+const TIME_SIG_SIZE = "1.75rem";
 
-/** Renders one song's chord chart, iReal-Pro style: a bordered grid of bars, grouped into rows
-    (breaking at each section and every `barsPerRow` bars), with boxed section letters, repeat
-    barlines, numbered-ending brackets and printed directions ("Fine", "D.C. al Coda", ...).
+// A short chart is allowed to scale *up* past its natural size to better fill the page (a 4-bar
+// tune at 1:1 would otherwise sit tiny in a sea of blank space) — capped well short of comically
+// large.
+const MAX_SCALE = 1.6;
 
-    The chart's own container must have `container-type: inline-size` set on it (or an ancestor)
-    for the `cqw`-based sizing above to have something to measure against — see ChordCharts.tsx. */
+/** Renders one song's chord chart. Two different fit strategies, depending on context:
+
+    - Normal (in-page): the chart always renders at *full container width* — never narrower —
+      and grows however tall it needs to (`PageFit`'s `fitHeight={false}` mode). This replaced an
+      earlier version that locked the page to a fixed `aspect-[8.5/11]` box: for a long chart
+      (many rows), that fixed ratio made *height* the binding constraint on how much the whole
+      thing could be scaled up, which then shrank the *width* right along with it — a long chart
+      on a narrow phone ended up rendered at a fraction of the screen's actual width, with wasted
+      margin on both sides, exactly the bug a direct follow-up reported ("long charts do this on
+      mobile... the width should match the width of the screen"). Decoupling the two fixes it:
+      width is always 100%, and the page simply grows taller for a longer chart (normal page
+      scroll below it, if any, same as any other tall page content — not the chart *itself*
+      needing an internal scrollbar, which is what was actually promised earlier).
+    - `fullscreen` (`ChordCharts.tsx`'s "maximize" toggle, `PageFit`'s `fitHeight={true}` mode):
+      here there genuinely is a fixed box (the full-screen overlay) with no "page below" to grow
+      into, so this mode keeps fitting *both* dimensions at once, exactly as before — the chart
+      still always fits with no scrolling, just inside whatever the screen's actual shape is
+      rather than a paper ratio. */
 export default function ChordChart({
   song,
   barsPerRow = 4,
+  fullscreen = false,
 }: {
   song: IRealSong;
   barsPerRow?: number;
+  fullscreen?: boolean;
 }) {
   const rows = groupRows(song.bars, barsPerRow);
 
   return (
     <div
-      className="w-full text-left"
-      style={
-        {
-          "--bars": barsPerRow,
-          "--col": "calc(100cqw / var(--bars))",
-        } as React.CSSProperties
-      }
+      className={`flex flex-col gap-4 text-left ${
+        fullscreen ? "h-full w-full" : "mx-auto w-full max-w-2xl"
+      }`}
     >
-      <div className="mb-5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-background pb-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-background pb-3">
         <div className="flex flex-col">
           <h2 className="text-2xl font-bold text-foreground sm:text-3xl">
             {song.title}
@@ -73,8 +147,16 @@ export default function ChordChart({
             {song.style && " · "}
             {song.key} · {song.timeSignature.top}/{song.timeSignature.bottom}
           </p>
+          {/* Maximized, the composer moves down here (left-aligned, under the title) instead of
+              flush right — the fullscreen "minimize" button sits top-right, and a long composer
+              name flush right collided with it. */}
+          {fullscreen && song.composer && (
+            <p className="text-sm text-muted sm:text-base">
+              {formatComposer(song.composer)}
+            </p>
+          )}
         </div>
-        {song.composer && (
+        {!fullscreen && song.composer && (
           <p className="shrink-0 text-sm text-muted sm:text-base">
             {formatComposer(song.composer)}
           </p>
@@ -83,13 +165,115 @@ export default function ChordChart({
 
       {song.bars.length === 0 ? (
         <p className="text-sm text-muted">No chords found in this chart.</p>
-      ) : (
-        <div className="flex flex-col gap-5 sm:gap-6">
-          {rows.map((row, i) => (
-            <Row key={i} bars={row} isLastRow={i === rows.length - 1} />
-          ))}
+      ) : fullscreen ? (
+        <div className="relative min-h-0 w-full flex-1 overflow-hidden rounded-xl bg-background">
+          <PageFit fitHeight>
+            {rows.map((row, i) => (
+              <Row
+                key={i}
+                bars={row}
+                barsPerRow={barsPerRow}
+                isFirstRow={i === 0}
+                isLastRow={i === rows.length - 1}
+                timeSignature={i === 0 ? song.timeSignature : undefined}
+              />
+            ))}
+          </PageFit>
         </div>
+      ) : (
+        <PageFit fitHeight={false}>
+          {rows.map((row, i) => (
+            <Row
+              key={i}
+              bars={row}
+              barsPerRow={barsPerRow}
+              isFirstRow={i === 0}
+              isLastRow={i === rows.length - 1}
+              timeSignature={i === 0 ? song.timeSignature : undefined}
+            />
+          ))}
+        </PageFit>
       )}
+    </div>
+  );
+}
+
+/** Measures its children at their natural (unscaled) size and applies one uniform
+    `transform: scale()` so the whole thing — not just one row or one bar — always fits. The same
+    "measure, then scale to fit" idea `FitChordRow` below uses for one bar's chord row, applied to
+    the entire chart. Two modes (see `ChordChart`'s own comment for why both exist):
+
+    - `fitHeight={true}`: fits *both* width and height inside a fixed box (an ancestor with a real
+      size, e.g. the full-screen overlay) — the original behavior, content centered within
+      whatever space is left over in the non-binding dimension.
+    - `fitHeight={false}`: fits *width only* (always scales to exactly fill the available width,
+      up to `MAX_SCALE`) and reports the resulting *height* back onto its own box, so the chart is
+      never narrower than its container just because it happens to be tall. */
+function PageFit({
+  children,
+  fitHeight,
+}: {
+  children: React.ReactNode;
+  fitHeight: boolean;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const [contentHeight, setContentHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const content = contentRef.current;
+    if (!box || !content) return;
+    const recompute = () => {
+      const availW = box.clientWidth;
+      const natW = content.scrollWidth;
+      const natH = content.scrollHeight;
+      if (availW <= 0 || natW <= 0 || natH <= 0) return;
+      if (fitHeight) {
+        const availH = box.clientHeight;
+        if (availH <= 0) return;
+        setScale(Math.min(MAX_SCALE, availW / natW, availH / natH));
+      } else {
+        const s = Math.min(MAX_SCALE, availW / natW);
+        setScale(s);
+        setContentHeight(natH * s);
+      }
+    };
+    recompute();
+    const observer = new ResizeObserver(recompute);
+    observer.observe(box);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [fitHeight]);
+
+  if (fitHeight) {
+    return (
+      <div ref={boxRef} className="absolute inset-x-1 inset-y-4 sm:inset-6">
+        <div
+          ref={contentRef}
+          className="absolute left-1/2 top-1/2 inline-flex flex-col items-start gap-4"
+          style={{ transform: `translate(-50%, -50%) scale(${scale})`, transformOrigin: "center" }}
+        >
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={boxRef}
+      className="relative w-full overflow-hidden rounded-xl bg-background"
+      style={{ height: contentHeight ?? undefined }}
+    >
+      <div
+        ref={contentRef}
+        className="absolute left-0 top-0 inline-flex flex-col items-start gap-3 p-3"
+        style={{ transform: `scale(${scale})`, transformOrigin: "top left" }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -128,7 +312,19 @@ function endingSpans(
   return spans;
 }
 
-function Row({ bars, isLastRow }: { bars: Bar[]; isLastRow: boolean }) {
+function Row({
+  bars,
+  barsPerRow,
+  isFirstRow,
+  isLastRow,
+  timeSignature,
+}: {
+  bars: Bar[];
+  barsPerRow: number;
+  isFirstRow: boolean;
+  isLastRow: boolean;
+  timeSignature?: { top: number; bottom: number };
+}) {
   // The section letter (A, B, ...) is drawn inside the row's first bar rather than in a gutter
   // column of its own — that gutter used to eat into the width available to the bars themselves,
   // which is exactly what's tight on a narrow screen.
@@ -136,11 +332,16 @@ function Row({ bars, isLastRow }: { bars: Bar[]; isLastRow: boolean }) {
   const spans = endingSpans(bars);
   const hasEndings = spans.length > 0;
 
+  // Always `barsPerRow` columns, even when this particular row (the chart's last, or one cut
+  // short by an explicit section break) has fewer actual bars than that — the remaining columns
+  // just stay blank, so every row keeps the same bar width instead of a short row's bars
+  // stretching (or the row itself shrinking) to fill the space. Matches how a real chart never
+  // changes bar width mid-line just because a line happens to end early.
   return (
     <div
-      className="grid w-full"
+      className="grid"
       style={{
-        gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))`,
+        gridTemplateColumns: `repeat(${barsPerRow}, ${COL_WIDTH})`,
         gridTemplateRows: hasEndings ? "1.5rem auto" : "auto",
       }}
     >
@@ -162,10 +363,12 @@ function Row({ bars, isLastRow }: { bars: Bar[]; isLastRow: boolean }) {
           key={i}
           bar={bar}
           section={i === 0 ? section : undefined}
+          timeSignature={i === 0 ? timeSignature : undefined}
           column={i + 1}
           row={hasEndings ? 2 : 1}
           isFirst={i === 0}
           isLast={i === bars.length - 1}
+          isFirstOfChart={isFirstRow && i === 0}
           isLastOfChart={isLastRow && i === bars.length - 1}
         />
       ))}
@@ -176,25 +379,33 @@ function Row({ bars, isLastRow }: { bars: Bar[]; isLastRow: boolean }) {
 function BarCell({
   bar,
   section,
+  timeSignature,
   column,
   row,
   isFirst,
   isLast,
+  isFirstOfChart,
   isLastOfChart,
 }: {
   bar: Bar;
   section?: string;
+  timeSignature?: { top: number; bottom: number };
   column: number;
   row: number;
   isFirst: boolean;
   isLast: boolean;
+  isFirstOfChart: boolean;
   isLastOfChart: boolean;
 }) {
-  const leftStyle = bar.startRepeat
-    ? "border-l-4 border-foreground"
-    : isFirst
-      ? "border-l border-muted/40"
-      : "";
+  // iReal Pro always draws the chart's very opening barline thick/doubled, independent of
+  // whether that bar happens to also carry an explicit repeat-open marker — matching that here
+  // rather than only going thick when `startRepeat` is actually set.
+  const leftStyle =
+    bar.startRepeat || isFirstOfChart
+      ? "border-l-4 border-foreground"
+      : isFirst
+        ? "border-l border-muted/40"
+        : "";
   const rightStyle = bar.endRepeat
     ? "border-r-4 border-foreground"
     : isLast
@@ -205,8 +416,8 @@ function BarCell({
 
   return (
     <div
-      className={`relative flex flex-col items-center justify-center gap-0.5 px-0.5 py-2 sm:py-3 ${leftStyle} ${rightStyle}`}
-      style={{ gridColumn: column, gridRow: row, minHeight: MIN_BAR_HEIGHT }}
+      className={`relative flex items-center justify-center gap-1 px-0.5 ${leftStyle} ${rightStyle}`}
+      style={{ gridColumn: column, gridRow: row, height: BAR_HEIGHT, width: COL_WIDTH }}
     >
       {bar.startRepeat && <RepeatDots side="left" />}
       {bar.endRepeat && <RepeatDots side="right" />}
@@ -220,13 +431,14 @@ function BarCell({
       )}
       {(bar.segno || bar.coda) && (
         <span
-          className="absolute right-0.5 top-0.5 text-accent"
+          className={`absolute right-0.5 top-0.5 text-accent ${chordSymbolFont.className}`}
           style={{ fontSize: SYMBOL_SIZE }}
           aria-hidden
         >
-          {bar.segno ? "𝄋" : "⊕"}
+          {bar.segno ? "" /* segno */ : "" /* coda */}
         </span>
       )}
+      {timeSignature && <TimeSignatureGlyph timeSignature={timeSignature} />}
       <BarContent bar={bar} />
       {bar.directive && (
         <span
@@ -237,6 +449,27 @@ function BarCell({
         </span>
       )}
     </div>
+  );
+}
+
+/** The stacked top/bottom time signature (e.g. "4" over "4") drawn just before the chart's very
+    first chord, the way iReal Pro always shows it, sitting as an ordinary flex sibling of the
+    chord label inside that one bar cell — it costs that bar some of its own room for the chord
+    symbol rather than adding an extra column. */
+function TimeSignatureGlyph({
+  timeSignature,
+}: {
+  timeSignature: { top: number; bottom: number };
+}) {
+  return (
+    <span
+      aria-hidden
+      className={`flex shrink-0 flex-col items-center justify-center leading-[0.85] text-foreground ${chordFont.className}`}
+      style={{ fontSize: TIME_SIG_SIZE }}
+    >
+      <span>{timeSignature.top}</span>
+      <span>{timeSignature.bottom}</span>
+    </span>
   );
 }
 
@@ -257,8 +490,12 @@ function RepeatDots({ side }: { side: "left" | "right" }) {
 function BarContent({ bar }: { bar: Bar }) {
   if (bar.content.kind === "repeat") {
     return (
-      <span className="text-muted" style={{ fontSize: REPEAT_SIZE }}>
-        %
+      <span
+        className={`text-muted ${chordSymbolFont.className}`}
+        style={{ fontSize: REPEAT_SIZE }}
+        aria-hidden
+      >
+        {"" /* repeat1Bar */}
       </span>
     );
   }
@@ -279,7 +516,9 @@ function BarContent({ bar }: { bar: Bar }) {
     horizontally compresses the whole row (`transform: scaleX()`, which only affects width — the
     text's height, and everything else about it, stays exactly as sized) by just enough that it
     stops overflowing the bar. Renders at natural size (no transform) until it actually doesn't
-    fit. */
+    fit. Orthogonal to `PageFit` above (which scales the *whole chart*) — this handles the
+    narrower case of one bar with more chords crammed into it than its own fixed `COL_WIDTH` can
+    comfortably hold at natural size. */
 function FitChordRow({ children }: { children: React.ReactNode }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -319,12 +558,11 @@ function FitChordRow({ children }: { children: React.ReactNode }) {
 const ACCIDENTAL_GLYPH: Record<"b" | "#", string> = { b: "♭", "#": "♯" };
 
 // Every part of a chord symbol below (root, its accidental, the quality/extension, the slash
-// bass) is sized with an explicit font-size driven by the `--col`-based clamp()s above, not a
-// relative `em` value. `quality` and `bass` sit as *siblings* of the root `<span>`, not children
-// of it, so an `em` on them would resolve against whatever font-size this label happens to
-// inherit from its bar cell — not against the root's own (much larger) size — which is exactly
-// why they used to stay illegibly small no matter how big that `em` value got. Explicit,
-// independently-computed sizes sidestep that entirely.
+// bass) is sized with an explicit fixed font-size, not a relative `em` value. `quality` and
+// `bass` sit as *siblings* of the root `<span>`, not children of it, so an `em` on them would
+// resolve against whatever font-size this label happens to inherit — not against the root's own
+// (much larger) size — which is exactly why they used to stay illegibly small no matter how big
+// that `em` value got. Explicit, independently-set sizes sidestep that entirely.
 function ChordLabel({ slot }: { slot: ChordSlot }) {
   if (slot.kind === "nc") {
     return (
@@ -363,12 +601,16 @@ function ChordLabel({ slot }: { slot: ChordSlot }) {
         )}
       </span>
       {slot.quality && (
-        <sup
-          className="ml-1 align-top font-medium text-foreground"
+        // Deliberately a plain baseline-aligned span, not `<sup>` — iReal Pro tucks the quality
+        // in at the root letter's own baseline (smaller, but not floated up above it the way a
+        // true superscript would), which is what the parent's `items-baseline` already gives a
+        // plain sibling span for free.
+        <span
+          className="ml-1 font-medium text-foreground"
           style={{ fontSize: QUALITY_SIZE }}
         >
-          {prettyQuality(slot.quality)}
-        </sup>
+          <QualityText quality={slot.quality} />
+        </span>
       )}
       {slot.bass && (
         <span className="ml-1.5 text-muted" style={{ fontSize: BASS_SIZE }}>

@@ -344,6 +344,98 @@ export function formatComposer(raw: string): string {
     .join("-");
 }
 
+const NOTE_PITCH: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const SHARP_SPELLING = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const FLAT_SPELLING = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+// Which spelling each pitch class is respelled with after a transpose — flats everywhere except
+// F#, the one "sharp" name jazz charts actually use in practice (e.g. "F#-7b5" in Blue Bossa)
+// rather than the enharmonically-identical "Gb-7b5". A fixed table, not derived from whatever
+// accidentals the original chart happened to use — matching a real lead book's own transposed
+// spelling exactly would need genuine key-signature analysis, out of scope here; this is a
+// reasonable, consistent approximation instead.
+const PREFER_FLAT = [
+  false, true, false, true, false, false, false, false, true, false, true, false,
+];
+
+function pitchClassOf(letter: string, accidental?: "b" | "#"): number {
+  const base = NOTE_PITCH[letter] ?? 0;
+  const shift = accidental === "#" ? 1 : accidental === "b" ? -1 : 0;
+  return (((base + shift) % 12) + 12) % 12;
+}
+
+function spellPitchClass(pc: number): { letter: string; accidental?: "b" | "#" } {
+  const wrapped = ((pc % 12) + 12) % 12;
+  const name = (PREFER_FLAT[wrapped] ? FLAT_SPELLING : SHARP_SPELLING)[wrapped];
+  return name.length > 1
+    ? { letter: name[0], accidental: name[1] as "b" | "#" }
+    : { letter: name[0] };
+}
+
+function transposeNote(
+  letter: string,
+  accidental: "b" | "#" | undefined,
+  semitones: number,
+): { letter: string; accidental?: "b" | "#" } {
+  return spellPitchClass(pitchClassOf(letter, accidental) + semitones);
+}
+
+function transposeSlot(slot: ChordSlot, semitones: number): ChordSlot {
+  if (slot.kind !== "chord") return slot;
+  const root = transposeNote(slot.letter, slot.accidental, semitones);
+  const bass = slot.bass ? transposeNote(slot.bass.letter, slot.bass.accidental, semitones) : undefined;
+  return { ...slot, letter: root.letter, accidental: root.accidental, bass };
+}
+
+function transposeBar(bar: Bar, semitones: number): Bar {
+  if (bar.content.kind !== "chords") return bar;
+  return {
+    ...bar,
+    content: { kind: "chords", slots: bar.content.slots.map((s) => transposeSlot(s, semitones)) },
+  };
+}
+
+function parseKeyLabel(key: string): { letter: string; accidental?: "b" | "#"; rest: string } | null {
+  const m = /^([A-G])([b#]?)(.*)$/.exec(key.trim());
+  if (!m) return null;
+  return { letter: m[1], accidental: (m[2] || undefined) as "b" | "#" | undefined, rest: m[3] };
+}
+
+/** Transposes a whole parsed chart — every chord root/bass, plus the printed key label — by a
+    number of semitones, purely for display: returns a new `IRealSong`, never mutates or persists
+    the original. `ChordCharts.tsx`'s "Transpose" control applies this to whichever song is
+    currently shown; it's a device-local display preference, the same category as "bars per row",
+    not something written back into the library. Wraps at the octave, since a chord symbol carries
+    no octave of its own — +13 behaves the same as +1. `semitones: 0` returns `song` itself
+    unchanged (no new object), so call sites can skip this entirely when nothing's transposed. */
+export function transposeSong(song: IRealSong, semitones: number): IRealSong {
+  const n = ((semitones % 12) + 12) % 12;
+  if (n === 0) return song;
+  const parsedKey = parseKeyLabel(song.key);
+  const key = parsedKey
+    ? (() => {
+        const spelled = spellPitchClass(pitchClassOf(parsedKey.letter, parsedKey.accidental) + n);
+        return `${spelled.letter}${spelled.accidental ?? ""}${parsedKey.rest}`;
+      })()
+    : song.key;
+  return { ...song, key, bars: song.bars.map((bar) => transposeBar(bar, n)) };
+}
+
+/** The 12 pitch classes' canonical display names, spelled the same flats-except-F# way
+    `transposeSong` itself respells with — what a "Transpose to" key picker (`ChordCharts.tsx`)
+    offers as its options. */
+export const KEY_NAMES: string[] = Array.from({ length: 12 }, (_, pc) => {
+  const { letter, accidental } = spellPitchClass(pc);
+  return `${letter}${accidental ?? ""}`;
+});
+
+/** The tonic pitch class of a chart's printed key label ("C", "Bb-", "F#7", ...), or `0` (C) if
+    the label doesn't parse as one. Lets a key picker work out how many semitones away a chosen
+    target key is from wherever the chart's own key currently sits. */
+export function keyPitchClass(key: string): number {
+  const parsed = parseKeyLabel(key);
+  return parsed ? pitchClassOf(parsed.letter, parsed.accidental) : 0;
+}
+
 /** Parses a pasted iReal Pro playlist link (or the HTML it was embedded in) into songs this app
     can render. Throws a short, user-facing message on anything that doesn't look right. */
 export function parseIrealPlaylist(input: string): IRealPlaylist {

@@ -5,24 +5,26 @@ import ChordChart from "@/components/ChordChart";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import Hint from "@/components/Hint";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import Select from "@/components/Select";
 import ToolLayout from "@/components/ToolLayout";
 import {
   BookIcon,
   ListIcon,
+  MaximizeIcon,
+  MinimizeIcon,
   SearchIcon,
   SlidersIcon,
   TrashIcon,
 } from "@/components/tools";
-import { formatComposer, parseIrealPlaylist } from "@/lib/iRealPro";
+import { formatComposer, keyPitchClass, KEY_NAMES, parseIrealPlaylist, transposeSong } from "@/lib/iRealPro";
+import { UNSORTED_PLAYLIST_ID } from "@/lib/chordChartsLibrary";
 import {
-  LIBRARY_DEFAULTS,
-  LIBRARY_KEY,
-  mergeSongs,
-  type StoredSong,
-} from "@/lib/chordChartsLibrary";
+  useChordChartsLibrary,
+  type LibraryPlaylist,
+  type LibrarySongMeta,
+} from "@/lib/useChordChartsLibrary";
 import { usePersistedSettings } from "@/lib/usePersistedSettings";
-import { useSyncedSettings } from "@/lib/useSyncedSettings";
 
 const VIEW_KEY = "jam-practice-chord-charts-view";
 const VIEW_DEFAULTS = { selectedId: "", barsPerRow: 4 };
@@ -30,16 +32,39 @@ const VIEW_DEFAULTS = { selectedId: "", barsPerRow: 4 };
 const BARS_PER_ROW_OPTIONS = [2, 3, 4, 6, 8];
 
 export default function ChordCharts() {
-  // Imported songs are this tool's real data, so they sync to the account when signed in
-  // (useSyncedSettings). barsPerRow/selectedId are a device-local display preference, not
-  // meaningfully "saved data" to follow across devices, so they stay on plain usePersistedSettings
-  // — unaffected by sign-in state, matching the same cosmetic-vs-data split this file already
-  // drew between these two keys before sync existed at all.
-  const [{ songs }, updateLibrary] = useSyncedSettings(LIBRARY_KEY, LIBRARY_DEFAULTS);
+  // barsPerRow/selectedId are a device-local display preference, not meaningfully "saved data" to
+  // follow across devices, so they stay on plain usePersistedSettings regardless of sign-in state
+  // — the actual library (what songs/playlists exist) is owned by useChordChartsLibrary below,
+  // which handles the signed-out-vs-signed-in split (and, signed in, a size limit that blob-based
+  // sync couldn't handle — see that hook's own comment) on its own.
   const [{ selectedId, barsPerRow }, updateView] = usePersistedSettings(
     VIEW_KEY,
     VIEW_DEFAULTS,
   );
+  const {
+    playlists: unsortedPlaylists,
+    totalSongs,
+    loading: libraryLoading,
+    selectedSong: selected,
+    selectedSongLoading,
+    importSongs,
+    deleteSong: removeSong,
+    clearAll,
+  } = useChordChartsLibrary(selectedId || null);
+
+  // The key to transpose the currently-viewed chart *to* — "" means "leave it in its own key". A
+  // per-viewing display transform, not saved data (same "bars per row" category, but ephemeral
+  // rather than persisted: it resets whenever a different tune is selected, rather than silently
+  // carrying over and surprising you on the next chart). Reset here during render rather than in a
+  // `useEffect` — the pattern React's own docs recommend for "adjust state when a prop changes" —
+  // so there's no extra render/flash and no `react-hooks/set-state-in-effect` lint issue to work
+  // around (see AccountMenu.tsx's own note on hitting that rule the effect-based way).
+  const [transposeKey, setTransposeKey] = useState("");
+  const [lastSelectedId, setLastSelectedId] = useState(selectedId);
+  if (selectedId !== lastSelectedId) {
+    setLastSelectedId(selectedId);
+    setTransposeKey("");
+  }
 
   const [linkText, setLinkText] = useState("");
   const [status, setStatus] = useState<{
@@ -48,15 +73,53 @@ export default function ChordCharts() {
   } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [maximized, setMaximized] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const selected = songs.find((s) => s.id === selectedId) ?? null;
+  // Escape exits the maximized (full-screen) chart, same as every other dismissable overlay in
+  // this app.
+  useEffect(() => {
+    if (!maximized) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMaximized(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [maximized]);
+  // Explicit expand/collapse overrides, keyed by playlist id — a playlist with no override shown
+  // expanded if it happens to contain the currently selected song (see `PlaylistSection` below),
+  // so picking a tune from search always reveals where it lives without a separate "reveal" action.
+  const [expandOverrides, setExpandOverrides] = useState<Record<string, boolean>>({});
+
   const sorted = useMemo(
-    () => [...songs].sort((a, b) => a.title.localeCompare(b.title)),
-    [songs],
+    () =>
+      unsortedPlaylists
+        .flatMap((p) => p.songs)
+        .sort((a, b) => a.title.localeCompare(b.title)),
+    [unsortedPlaylists],
+  );
+  // "Unsorted" (songs saved before playlists existed, or otherwise orphaned) always sorts last —
+  // everything else alphabetically, same as the flat list used to be ordered.
+  const playlists = useMemo(() => {
+    const real = unsortedPlaylists
+      .filter((p) => p.id !== UNSORTED_PLAYLIST_ID)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const unsorted = unsortedPlaylists.filter((p) => p.id === UNSORTED_PLAYLIST_ID);
+    return [...real, ...unsorted];
+  }, [unsortedPlaylists]);
+
+  // The chosen key's distance in semitones from the chart's own key — `transposeSong` itself
+  // wraps at the octave, so this only ever needs to land somewhere in 0-11, never negative.
+  const transposeSemitones =
+    selected && transposeKey
+      ? (KEY_NAMES.indexOf(transposeKey) - keyPitchClass(selected.key) + 12) % 12
+      : 0;
+  const displayed = useMemo(
+    () => (selected && transposeSemitones !== 0 ? transposeSong(selected, transposeSemitones) : selected),
+    [selected, transposeSemitones],
   );
 
-  function importText(text: string) {
+  async function importText(text: string) {
     let playlist;
     try {
       playlist = parseIrealPlaylist(text);
@@ -67,30 +130,36 @@ export default function ChordCharts() {
       });
       return;
     }
-    const { songs: merged, added, skipped } = mergeSongs(songs, playlist.songs);
-    updateLibrary({ songs: merged });
-    setStatus({
-      kind: "ok",
-      message:
-        `Imported ${added} song${added === 1 ? "" : "s"} from "${playlist.name}".` +
-        (skipped > 0 ? ` (${skipped} already in your library.)` : ""),
-    });
-    setLinkText("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    try {
+      const { added, skipped } = await importSongs(playlist.songs, playlist.name);
+      setStatus({
+        kind: "ok",
+        message:
+          `Imported ${added} song${added === 1 ? "" : "s"} into "${playlist.name}".` +
+          (skipped > 0 ? ` (${skipped} already in your library.)` : ""),
+      });
+      setLinkText("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (e) {
+      setStatus({
+        kind: "error",
+        message: e instanceof Error ? e.message : "Couldn't import that playlist.",
+      });
+    }
   }
 
   function handleFile(file: File) {
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === "string") importText(reader.result);
+      if (typeof reader.result === "string") void importText(reader.result);
     };
     reader.onerror = () =>
       setStatus({ kind: "error", message: "Couldn't read that file." });
     reader.readAsText(file);
   }
 
-  function deleteSong(id: string) {
-    updateLibrary({ songs: songs.filter((s) => s.id !== id) });
+  async function deleteSong(id: string) {
+    await removeSong(id);
     if (selectedId === id) updateView({ selectedId: "" });
   }
 
@@ -100,14 +169,14 @@ export default function ChordCharts() {
         <div className="flex w-full min-w-0 flex-col gap-3 xl:w-80 xl:shrink-0">
           <CollapsiblePanel
             id="chord-charts-tunes"
-            title={`Tunes${songs.length ? ` (${songs.length})` : ""}`}
+            title={`Tunes${totalSongs ? ` (${totalSongs})` : ""}`}
             icon={ListIcon}
             action={
               <>
                 <button
                   type="button"
                   onClick={() => setConfirmClear(true)}
-                  disabled={songs.length === 0}
+                  disabled={totalSongs === 0}
                   aria-label="Clear all tunes"
                   title="Clear all tunes"
                   className="flex h-8 w-8 items-center justify-center rounded-full bg-background text-muted hover:text-danger disabled:opacity-40"
@@ -117,7 +186,7 @@ export default function ChordCharts() {
                 <button
                   type="button"
                   onClick={() => setSearchOpen(true)}
-                  disabled={songs.length === 0}
+                  disabled={totalSongs === 0}
                   aria-label="Search tunes"
                   title="Search tunes"
                   className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-accent-foreground hover:bg-accent-hover disabled:opacity-40"
@@ -127,50 +196,30 @@ export default function ChordCharts() {
               </>
             }
           >
-            {songs.length === 0 ? (
+            {libraryLoading ? (
+              <div className="flex justify-center py-4">
+                <LoadingSpinner />
+              </div>
+            ) : totalSongs === 0 ? (
               <p className="text-sm text-muted">
                 No tunes yet. Import a playlist below to get started.
               </p>
             ) : (
-              <ul className="flex max-h-[24rem] flex-col gap-0.5 overflow-y-auto pr-1">
-                {sorted.map((song) => (
-                  <li key={song.id} className="group flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => updateView({ selectedId: song.id })}
-                      className={`flex-1 truncate rounded-lg px-2 py-1.5 text-left text-sm transition-colors ${
-                        song.id === selectedId
-                          ? "bg-accent text-accent-foreground"
-                          : "hover:bg-background"
-                      }`}
-                    >
-                      <span className="block truncate font-medium">
-                        {song.title}
-                      </span>
-                      {song.composer && (
-                        <span
-                          className={`block truncate text-xs ${
-                            song.id === selectedId
-                              ? "text-accent-foreground/80"
-                              : "text-muted"
-                          }`}
-                        >
-                          {formatComposer(song.composer)}
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteSong(song.id)}
-                      aria-label={`Remove ${song.title}`}
-                      title="Remove"
-                      className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-background hover:text-danger group-hover:flex"
-                    >
-                      <TrashIcon className="h-3.5 w-3.5" />
-                    </button>
-                  </li>
+              <div className="flex max-h-[24rem] flex-col gap-1 overflow-y-auto pr-1">
+                {playlists.map((playlist) => (
+                  <PlaylistSection
+                    key={playlist.id}
+                    playlist={playlist}
+                    selectedId={selectedId}
+                    forcedOpen={expandOverrides[playlist.id]}
+                    onToggle={(open) =>
+                      setExpandOverrides((prev) => ({ ...prev, [playlist.id]: open }))
+                    }
+                    onSelect={(id) => updateView({ selectedId: id })}
+                    onDelete={deleteSong}
+                  />
                 ))}
-              </ul>
+              </div>
             )}
           </CollapsiblePanel>
 
@@ -195,7 +244,7 @@ export default function ChordCharts() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => linkText.trim() && importText(linkText)}
+                onClick={() => linkText.trim() && void importText(linkText)}
                 disabled={!linkText.trim()}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-40"
               >
@@ -245,31 +294,73 @@ export default function ChordCharts() {
               />
             </label>
             <Hint>How many bars are shown per line before wrapping to the next.</Hint>
+
+            <label className="flex items-center justify-between gap-3 text-sm">
+              <span className="font-medium text-muted">Key</span>
+              <Select
+                value={transposeKey}
+                onChange={setTransposeKey}
+                disabled={!selected}
+                options={[
+                  { value: "", label: selected ? `Original (${selected.key || "—"})` : "Original" },
+                  ...KEY_NAMES.map((k) => ({ value: k, label: k })),
+                ]}
+                className="min-w-32"
+              />
+            </label>
+            <Hint>
+              Transposes every chord (and the printed key) to a different key, without changing
+              your saved chart — resets to the original key when you pick a different tune.
+            </Hint>
           </CollapsiblePanel>
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center justify-center rounded-2xl bg-background p-4 sm:p-6">
-          {selected ? (
-            // `container-type: inline-size` turns this box into the reference width the chart's
-            // own cqw-based chord sizing measures against, so chords scale to whatever room is
-            // actually available here (not the viewport) and never need to force a scrollbar.
-            // `overflow-x-auto` stays on as a last-resort safety net for extreme bars-per-row /
-            // narrow-screen combinations the sizing clamp can't fully absorb.
-            <div
-              className="w-full max-w-full overflow-x-auto"
-              style={{ containerType: "inline-size" }}
-            >
-              <ChordChart song={selected} barsPerRow={barsPerRow} />
-            </div>
+        <div className="relative flex min-w-0 flex-1 items-center justify-center rounded-2xl bg-background px-1 py-4 sm:p-6">
+          {selectedSongLoading ? (
+            <LoadingSpinner label="Loading chart…" showLabel />
+          ) : selected && displayed ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setMaximized(true)}
+                aria-label="Maximize chart"
+                title="Maximize"
+                className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface text-muted hover:bg-surface-hover hover:text-foreground"
+              >
+                <MaximizeIcon className="h-4 w-4" />
+              </button>
+              {/* ChordChart manages its own page-shaped box and scales its whole contents to fit
+                  it (see that component's own comment) — no responsive wrapper needed here. */}
+              <div className="w-full max-w-full">
+                <ChordChart song={displayed} barsPerRow={barsPerRow} />
+              </div>
+            </>
           ) : (
             <p className="text-center text-sm text-muted">
-              {songs.length === 0
+              {totalSongs === 0
                 ? "Import a playlist to see your first chart here."
                 : "Press the search icon to find a tune."}
             </p>
           )}
         </div>
       </div>
+
+      {maximized && selected && displayed && (
+        <div className="fixed inset-0 z-[80] flex flex-col gap-3 bg-background p-4 sm:p-6">
+          <button
+            type="button"
+            onClick={() => setMaximized(false)}
+            aria-label="Exit full screen"
+            title="Minimize"
+            className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-surface text-muted hover:bg-surface-hover hover:text-foreground sm:right-6 sm:top-6"
+          >
+            <MinimizeIcon className="h-4 w-4" />
+          </button>
+          <div className="min-h-0 flex-1">
+            <ChordChart song={displayed} barsPerRow={barsPerRow} fullscreen />
+          </div>
+        </div>
+      )}
 
       {searchOpen && (
         <TuneSearchPopup
@@ -288,7 +379,7 @@ export default function ChordCharts() {
           message="This removes every imported chart from this browser. You can re-import a playlist any time."
           confirmLabel="Clear all"
           onConfirm={() => {
-            updateLibrary({ songs: [] });
+            void clearAll();
             updateView({ selectedId: "" });
             setConfirmClear(false);
           }}
@@ -296,6 +387,98 @@ export default function ChordCharts() {
         />
       )}
     </ToolLayout>
+  );
+}
+
+/** One playlist's row in the "Tunes" panel — a header (chevron, name, song count) that expands to
+    that playlist's songs, same row styling (selection highlight, hover-revealed delete button) the
+    flat list used before playlists existed. `forcedOpen` is the parent's explicit override, if
+    there is one; with no override, a playlist that contains the currently selected song shows
+    expanded by default so picking a tune (e.g. from search) always reveals where it lives, without
+    that needing to be written into `forcedOpen` itself — see `ChordCharts`' own `expandOverrides`
+    comment. */
+function PlaylistSection({
+  playlist,
+  selectedId,
+  forcedOpen,
+  onToggle,
+  onSelect,
+  onDelete,
+}: {
+  playlist: LibraryPlaylist;
+  selectedId: string;
+  forcedOpen: boolean | undefined;
+  onToggle: (open: boolean) => void;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const containsSelected = playlist.songs.some((s) => s.id === selectedId);
+  const open = forcedOpen ?? containsSelected;
+  const sortedSongs = useMemo(
+    () => [...playlist.songs].sort((a, b) => a.title.localeCompare(b.title)),
+    [playlist.songs],
+  );
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => onToggle(!open)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 rounded-lg px-1 py-1.5 text-left text-sm font-semibold text-muted transition-colors hover:text-foreground"
+      >
+        <svg
+          viewBox="0 0 20 20"
+          className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 8l5 5 5-5" />
+        </svg>
+        <span className="min-w-0 flex-1 truncate">{playlist.name}</span>
+        <span className="shrink-0 tabular-nums text-xs text-muted">{playlist.songs.length}</span>
+      </button>
+      {open && (
+        <ul className="flex flex-col gap-0.5 py-0.5 pl-5">
+          {sortedSongs.map((song) => (
+            <li key={song.id} className="group flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onSelect(song.id)}
+                className={`flex-1 truncate rounded-lg px-2 py-1.5 text-left text-sm transition-colors ${
+                  song.id === selectedId
+                    ? "bg-accent text-accent-foreground"
+                    : "hover:bg-background"
+                }`}
+              >
+                <span className="block truncate font-medium">{song.title}</span>
+                {song.composer && (
+                  <span
+                    className={`block truncate text-xs ${
+                      song.id === selectedId ? "text-accent-foreground/80" : "text-muted"
+                    }`}
+                  >
+                    {formatComposer(song.composer)}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(song.id)}
+                aria-label={`Remove ${song.title}`}
+                title="Remove"
+                className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-background hover:text-danger group-hover:flex"
+              >
+                <TrashIcon className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -307,7 +490,7 @@ function TuneSearchPopup({
   onSelect,
   onClose,
 }: {
-  songs: StoredSong[];
+  songs: LibrarySongMeta[];
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
