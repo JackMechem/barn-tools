@@ -151,7 +151,7 @@ export default function CommunityChordCharts() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
         <p className="text-sm text-muted">
-          Chord charts and playlists other jackshed users have posted. Import one straight into
+          Chord charts and playlists other sheddex users have posted. Import one straight into
           your own Chord Charts library.
         </p>
         {profile !== undefined &&

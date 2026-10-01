@@ -179,7 +179,7 @@ function AuthForm({ onClose }: { onClose: () => void }) {
 
         {flow === "signUp" && (
           <p className="text-xs text-muted">
-            By creating an account, you agree to jackshed&apos;s{" "}
+            By creating an account, you agree to sheddex&apos;s{" "}
             <Link href="/terms" className="underline hover:text-foreground">
               Terms
             </Link>{" "}

@@ -11,7 +11,7 @@ import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "jackshed",
+  title: "sheddex",
   description: "Practice tools for musicians: a jam tune picker, a note trainer, and more.",
 };
 

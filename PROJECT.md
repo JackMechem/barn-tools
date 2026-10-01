@@ -1,4 +1,4 @@
-# jackshed — project notes for AI agents
+# sheddex — project notes for AI agents
 
 This file is for picking up work on this repo in a fresh session (including on a different
 computer after a clone). It's hand-maintained, separate from the auto-generated Next.js warning
@@ -14,12 +14,28 @@ As of this session there's a real backend (Convex) for one thing only: accounts 
 and "Sign in with Google"), so far with **nothing synced yet** — see "Backend (Convex)" below for
 what exists, what's next, and the honest state of what's been verified.
 
-- **Displayed name:** "jackshed" (all lowercase, shown as the sidebar logo text and page title).
+- **Displayed name:** "sheddex" (all lowercase, shown as the sidebar logo text and page title).
   It's been renamed several times in development (Barn Tools → Woodshed → The Barn → Barn Tools →
-  shed.io → jshed.io → jackshed) — if asked to rename again, it's a simple find/replace across
-  `app/layout.tsx`, `components/Sidebar.tsx`, `components/Home.tsx`, `app/recorder/page.tsx`.
-- **GitHub remote:** `git@github.com:JackMechem/jackshed.com.git` (also renamed a few times;
-  the home page's GitHub link in `components/Home.tsx` should match whatever it currently is).
+  shed.io → jshed.io → jackshed → sheddex) — if asked to rename again, it's a plain find/replace
+  for the lowercase name string, but by this point it's spread far wider than just the UI chrome:
+  this rename alone touched `app/layout.tsx`, `components/Sidebar.tsx`, `components/Home.tsx`,
+  `app/recorder/page.tsx`, `app/credits/page.tsx`, `app/privacy/page.tsx`, `app/terms/page.tsx`,
+  `README.md`, `convex/account.ts`, `convex/ResendOTP.ts`, `convex/lib/resend.ts` (the email
+  "from" display name), `lib/chartString.ts` (the `jackshed://` chart-link scheme itself, now
+  `sheddex://` — a real, if small, backward-compatibility break: any chart link exported before
+  this rename starts with the *old* scheme and will no longer be recognized by
+  `looksLikeChartString`/`decodeChartString`, not something an in-place rename can avoid), and
+  several Community-facing components with "jackshed users" style copy
+  (`components/CommunityChordCharts.tsx`, `components/CommunityTunes.tsx`,
+  `components/AccountMenu.tsx`, `components/PublicProfileEditor.tsx`, `components/ChordCharts.tsx`,
+  `components/ChordChartEditor.tsx`) — confirmed by grepping the whole repo for the old name
+  afterward (case-sensitive and case-insensitive both) rather than trusting this list alone, since
+  the equivalent list from the *previous* rename (just the four UI-chrome files) had already gone
+  stale by the time this one happened.
+- **GitHub remote:** `git@github.com:JackMechem/sheddex.com.git` (also renamed a few times;
+  the home page's GitHub link in `components/Home.tsx` should match whatever it currently is) —
+  the actual remote/domain rename is Jack's own external step (can't be done from here), so this
+  session's own change just updates the in-app links to the name they're *expected* to point to.
 - Jack drives development one request at a time and reviews by screenshot, so expect iterative,
   pixel-level follow-ups rather than big up-front specs. He's comfortable with technical detail in
   replies but the built-in style here favors plain, concrete explanations over jargon.
@@ -497,12 +513,12 @@ what exists, what's next, and the honest state of what's been verified.
   positions sensibly from inside the "Display" panel in a real browser — this sandbox still has no
   working browser, same caveat as everything else UI-shaped in Chord Charts.
 
-  **jackshed's own chart-link format, and a from-scratch chart builder** (per a direct request:
+  **sheddex's own chart-link format, and a from-scratch chart builder** (per a direct request:
   "make a custom way of representing chord charts in a string kinda like the irealpro links... if
   I paste an ireal pro playlist link into there it should still worki but I dont want it to say
   anywhere that you can do that... create a tool within the chord chart page to create chord
   charts"). Three pieces:
-  - `lib/chartString.ts` — `encodeChartString`/`decodeChartString`, a `jackshed://<base64 JSON>`
+  - `lib/chartString.ts` — `encodeChartString`/`decodeChartString`, a `sheddex://<base64 JSON>`
     string encoding the exact same `IRealPlaylist`/`IRealSong`/`Bar` shape this app already parses
     an iReal chart into, rather than inventing a second token grammar to mimic iReal's own scrambled
     encoding — "kinda like the irealpro links" in that it's one opaque, copy-pasteable string, not
@@ -514,7 +530,7 @@ what exists, what's next, and the honest state of what's been verified.
     becomes 4/4) rather than failing the whole import — and its own error message is deliberately
     generic, never naming iReal Pro, since it's the message a normal user actually sees.
   - **"Import a playlist" now reads this format first** (`ChordCharts.tsx`'s `parsePlaylistInput`):
-    `looksLikeChartString` checks for the `jackshed://` prefix, and only if that doesn't match does
+    `looksLikeChartString` checks for the `sheddex://` prefix, and only if that doesn't match does
     it fall through to the *existing*, completely unmodified `parseIrealPlaylist` — a real iReal
     Pro link genuinely still works, exactly as before, but that fallback is now quiet on purpose:
     the panel's hint text, its textarea placeholder, and the generic catch-all error shown when
@@ -550,7 +566,7 @@ what exists, what's next, and the honest state of what's been verified.
     its footer: **Save to library** (calls the same `importSongs` "Import a playlist" itself uses,
     in a playlist named after the chart's own title — "every chart is in a playlist" holds the same
     way here as for anything else added to the library) and **Export as chart link** (reveals the
-    `jackshed://` string in a read-only textarea with a Copy button, `navigator.clipboard.writeText`
+    `sheddex://` string in a read-only textarea with a Copy button, `navigator.clipboard.writeText`
     with no fallback — this app's first use of the Clipboard API, and a genuine platform-only
     choice: if permission is denied or the API's unavailable, the text is still visible and
     selectable by hand in the textarea, so there's no dead end, just a smaller convenience lost).
@@ -571,7 +587,7 @@ what exists, what's next, and the honest state of what's been verified.
   correctly rejects both a real iReal-style `irealb://` string and arbitrary plain text (confirming
   the two formats stay genuinely distinguishable, not just informally); a non-matching string
   throws an error that was checked, by regex, to never contain the word "ireal" anywhere in its
-  message; garbage base64 after a valid `jackshed://` prefix throws instead of crashing; and a
+  message; garbage base64 after a valid `sheddex://` prefix throws instead of crashing; and a
   payload with one well-formed song alongside a titleless object and a bare number correctly keeps
   only the one valid song, with its missing time signature defaulting to 4/4 rather than throwing.
   `tsc`, `eslint`, and `next build` all pass. **Not verified**: that a real iReal Pro link *itself*
@@ -1217,7 +1233,7 @@ what exists, what's next, and the honest state of what's been verified.
   before. There's no separate icon logo anywhere in the app anymore either, per an earlier follow-up
   request in this same session — the old hand-drawn barn-roof SVG, `BarnLogo` in
   `components/tools.tsx`, was deleted outright (not just unmounted), along with its icon-box wrapper
-  in both the desktop and mobile sidebar headers — the "jackshed" text itself is the logo
+  in both the desktop and mobile sidebar headers — the "sheddex" text itself is the logo
   everywhere now. Shows "Welcome back, {name}" above the title once signed in — `user.name` (only
   ever set by Google sign-in) if there is one, `user.email` otherwise, since every account has one
   or the other but not necessarily both, same fallback order this app already uses elsewhere for a

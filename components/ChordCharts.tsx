@@ -44,7 +44,7 @@ function NOOP_SUBSCRIBE() {
   return () => {};
 }
 
-/** What "Import a playlist" actually reads: a jackshed chart link (`lib/chartString.ts`) first,
+/** What "Import a playlist" actually reads: a sheddex chart link (`lib/chartString.ts`) first,
     falling back to a real iReal Pro playlist link (`parseIrealPlaylist`) if it isn't one of
     those — quietly still supported, since a real iReal link is still perfectly good input, but
     deliberately never named anywhere in this panel's own copy (placeholder, hint text, or this
@@ -56,7 +56,7 @@ function parsePlaylistInput(text: string) {
   try {
     return parseIrealPlaylist(text);
   } catch {
-    throw new Error("Couldn't read that — paste a jackshed chord chart link.");
+    throw new Error("Couldn't read that — paste a sheddex chord chart link.");
   }
 }
 
@@ -287,13 +287,13 @@ export default function ChordCharts() {
             icon={BookIcon}
           >
             <Hint>
-              Paste a jackshed chord chart link below — export one from the chart builder, or from
+              Paste a sheddex chord chart link below — export one from the chart builder, or from
               a chart someone shared with you — or choose a text file it was saved to.
             </Hint>
             <textarea
               value={linkText}
               onChange={(e) => setLinkText(e.target.value)}
-              placeholder="jackshed://..."
+              placeholder="sheddex://..."
               rows={4}
               className="w-full resize-y rounded-lg bg-background p-2 text-left font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent"
             />

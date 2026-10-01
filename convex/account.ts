@@ -109,8 +109,8 @@ async function sendConfirmationCode(
   });
   const subject =
     kind === "deleteAccount"
-      ? "Confirm deleting your jackshed account"
-      : "Confirm your jackshed password change";
+      ? "Confirm deleting your sheddex account"
+      : "Confirm your sheddex password change";
   const action =
     kind === "deleteAccount"
       ? "permanently delete your account"

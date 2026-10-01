@@ -37,7 +37,7 @@ export default function Home() {
             </p>
           )}
           <h1 className="text-6xl font-bold leading-[0.95] tracking-tight text-accent sm:text-7xl">
-            jackshed
+            sheddex
           </h1>
           <p className="max-w-md text-lg text-muted">
             Metronome, tuner, ear trainers, chart reader, multitrack recorder.
@@ -74,7 +74,7 @@ export default function Home() {
             I&apos;m Jack. I play music and write software. I got tired of
             opening five different apps just to practice: one for the metronome,
             one for the tuner, one for recording, and a notes app for tune
-            lists. So I built jackshed. It&apos;s everything I need for a
+            lists. So I built sheddex. It&apos;s everything I need for a
             practice session, in one place, working the way I want it to.
           </p>
           <a
@@ -128,7 +128,7 @@ export default function Home() {
           </span>
           <span aria-hidden>·</span>
           <a
-            href="https://github.com/JackMechem/jackshed.com"
+            href="https://github.com/JackMechem/sheddex.com"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 font-medium text-accent underline-offset-4 outline-none hover:underline focus-visible:underline"

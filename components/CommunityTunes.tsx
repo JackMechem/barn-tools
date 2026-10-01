@@ -133,7 +133,7 @@ export default function CommunityTunes() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
         <p className="text-sm text-muted">
-          Tunes and tune lists other jackshed users have posted. Add one into your own Tunes, or
+          Tunes and tune lists other sheddex users have posted. Add one into your own Tunes, or
           your Tunes to Learn list.
         </p>
         {profile !== undefined &&

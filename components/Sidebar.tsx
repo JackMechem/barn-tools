@@ -393,10 +393,10 @@ export default function Sidebar() {
             <Link
               href="/"
               onClick={() => setMobileOpen(false)}
-              aria-label="jackshed home"
+              aria-label="sheddex home"
               className="rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
-              <span className="text-xl font-bold tracking-tight text-accent">jackshed</span>
+              <span className="text-xl font-bold tracking-tight text-accent">sheddex</span>
             </Link>
             <button
               type="button"
@@ -449,11 +449,11 @@ export default function Sidebar() {
           {!collapsed && (
             <Link
               href="/"
-              aria-label="jackshed home"
+              aria-label="sheddex home"
               className="min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <span className="truncate text-lg font-bold tracking-tight text-accent">
-                jackshed
+               sheddex 
               </span>
             </Link>
           )}

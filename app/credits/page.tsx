@@ -1,14 +1,14 @@
 import { LegalLink, LegalPage, LegalSection } from "@/components/LegalPage";
 
 export const metadata = {
-  title: "Credits — jackshed",
+  title: "Credits — sheddex",
 };
 
 export default function CreditsPage() {
   return (
     <LegalPage title="Credits" updated="September 30, 2026">
       <p className="text-sm leading-relaxed text-foreground/90">
-        jackshed&apos;s sounds are almost entirely synthesized in the browser (see the Tone menu in
+        sheddex&apos;s sounds are almost entirely synthesized in the browser (see the Tone menu in
         the trainers, the metronome, and Guess the Interval/Guess the Chord for the full list) —
         with two exceptions: the <strong>Piano</strong> and <strong>Rhodes</strong> tones are real
         recordings, fetched from their original hosts the first time you pick them. Both are
@@ -43,7 +43,7 @@ export default function CreditsPage() {
 
       <LegalSection title="How this works">
         <p>
-          Neither sample set ships with jackshed itself — your browser fetches the specific notes a
+          Neither sample set ships with sheddex itself — your browser fetches the specific notes a
           tool actually plays directly from the hosts above (both GitHub Pages), the first time
           each one comes up, and keeps them for the rest of that browser tab so repeats are
           instant. See the{" "}
@@ -60,7 +60,7 @@ export default function CreditsPage() {
           <strong> Petaluma Script</strong> (a hand-inked text face) for the letters and numbers,
           paired with <strong>Petaluma</strong> itself for the major-seventh and diminished chord
           symbols, which it draws as real engraved marks rather than a stand-in character from an
-          ordinary font. Unlike the audio above, both are bundled with jackshed itself rather than
+          ordinary font. Unlike the audio above, both are bundled with sheddex itself rather than
           fetched from elsewhere, under Steinberg&apos;s own{" "}
           <LegalLink href="https://scripts.sil.org/OFL">SIL Open Font License 1.1</LegalLink>.
         </p>

@@ -1,6 +1,6 @@
 import type { IRealPlaylist, IRealSong } from "./iRealPro";
 
-// jackshed's own plain-string format for sharing a chord chart or a small chart "playlist" —
+// sheddex's own plain-string format for sharing a chord chart or a small chart "playlist" —
 // deliberately similar in spirit to iReal Pro's own `irealb://...` links (one opaque,
 // copy-pasteable string) but not tied to iReal's scrambled/compressed encoding or its own
 // plain-text chart grammar at all: just the exact same `IRealSong`/`Bar` shape this app already
@@ -9,7 +9,7 @@ import type { IRealPlaylist, IRealSong } from "./iRealPro";
 // back to reading a real iReal Pro link too if what's pasted isn't one of these — kept working on
 // purpose, just never mentioned anywhere in that panel's own copy; see that file's own
 // `parsePlaylistInput`.
-const SCHEME = "jackshed://";
+const SCHEME = "sheddex://";
 
 function toBase64(json: string): string {
   const bytes = new TextEncoder().encode(json);
@@ -53,7 +53,7 @@ function sanitizeSong(raw: unknown): IRealSong | null {
   };
 }
 
-/** Parses a `jackshed://...` chart link back into a playlist. Throws a short, user-facing message
+/** Parses a `sheddex://...` chart link back into a playlist. Throws a short, user-facing message
     if the string isn't this format at all or its payload isn't readable JSON, matching
     `parseIrealPlaylist`'s own error-handling shape — but stays deliberately generic (never
     mentions iReal Pro), since `ChordCharts.tsx` falls back to that parser afterward and this
@@ -61,7 +61,7 @@ function sanitizeSong(raw: unknown): IRealSong | null {
 export function decodeChartString(input: string): IRealPlaylist {
   const trimmed = input.trim();
   if (!trimmed.startsWith(SCHEME)) {
-    throw new Error("That doesn't look like a jackshed chord chart link.");
+    throw new Error("That doesn't look like a sheddex chord chart link.");
   }
   let parsed: unknown;
   try {
