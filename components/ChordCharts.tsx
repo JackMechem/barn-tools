@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import ChordChart from "@/components/ChordChart";
 import ChordChartEditor from "@/components/ChordChartEditor";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
@@ -33,6 +33,16 @@ const VIEW_KEY = "jam-practice-chord-charts-view";
 const VIEW_DEFAULTS = { selectedId: "", barsPerRow: 4 };
 
 const BARS_PER_ROW_OPTIONS = [2, 3, 4, 6, 8];
+
+// `useSyncExternalStore`'s own recommended "is this the client yet" trick (an unchanging store
+// that's "false" on the server and "true" on the client) — the same mechanism
+// `lib/usePersistedSettings.ts` already relies on for hydration safety, just applied directly
+// here rather than through a localStorage-backed store. Deliberately not a plain
+// `useState(false)` + `useEffect(() => setTrue(), [])`, which the React Compiler's lint flags
+// (`react-hooks/set-state-in-effect`) as exactly the cascading-render anti-pattern this sidesteps.
+function NOOP_SUBSCRIBE() {
+  return () => {};
+}
 
 /** What "Import a playlist" actually reads: a jackshed chart link (`lib/chartString.ts`) first,
     falling back to a real iReal Pro playlist link (`parseIrealPlaylist`) if it isn't one of
@@ -95,6 +105,19 @@ export default function ChordCharts() {
   const [maximized, setMaximized] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // `totalSongs` can legitimately differ between the server-rendered markup and this device's
+  // actual first client render (signed-out: localStorage; signed-in: a Convex query that hasn't
+  // resolved yet on the server) — gating every `totalSongs === 0` check behind "has this component
+  // actually mounted on the client yet" guarantees the very first client render matches the server
+  // (both treat the library as empty) regardless of which path caused the mismatch, with the real
+  // value taking over immediately after that first paint.
+  const mounted = useSyncExternalStore(
+    NOOP_SUBSCRIBE,
+    () => true,
+    () => false,
+  );
+  const shownTotalSongs = mounted ? totalSongs : 0;
 
   // Escape exits the maximized (full-screen) chart, same as every other dismissable overlay in
   // this app.
@@ -183,20 +206,35 @@ export default function ChordCharts() {
     if (selectedId === id) updateView({ selectedId: "" });
   }
 
+  // The chart builder takes over this page's entire content area while open — not a popup over
+  // it — per a direct request ("should not be a popup, it should take up the entire chord charts
+  // view"); the normal Tunes/Import/Create/Display + chart view below is simply not rendered at
+  // all while `showEditor` is true, rather than sitting hidden underneath it.
+  if (showEditor) {
+    return (
+      <ToolLayout title="Chord Charts" layout="stacked" topAligned options={null}>
+        <ChordChartEditor
+          onSave={(song) => importSongs([song], song.title)}
+          onClose={() => setShowEditor(false)}
+        />
+      </ToolLayout>
+    );
+  }
+
   return (
     <ToolLayout title="Chord Charts" layout="stacked" topAligned options={null}>
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 overflow-x-hidden xl:flex-row xl:items-start">
         <div className="flex w-full min-w-0 flex-col gap-3 xl:w-80 xl:shrink-0">
           <CollapsiblePanel
             id="chord-charts-tunes"
-            title={`Tunes${totalSongs ? ` (${totalSongs})` : ""}`}
+            title={`Tunes${shownTotalSongs ? ` (${shownTotalSongs})` : ""}`}
             icon={ListIcon}
             action={
               <>
                 <button
                   type="button"
                   onClick={() => setConfirmClear(true)}
-                  disabled={totalSongs === 0}
+                  disabled={shownTotalSongs === 0}
                   aria-label="Clear all tunes"
                   title="Clear all tunes"
                   className="flex h-8 w-8 items-center justify-center rounded-full bg-background text-muted hover:text-danger disabled:opacity-40"
@@ -206,7 +244,7 @@ export default function ChordCharts() {
                 <button
                   type="button"
                   onClick={() => setSearchOpen(true)}
-                  disabled={totalSongs === 0}
+                  disabled={shownTotalSongs === 0}
                   aria-label="Search tunes"
                   title="Search tunes"
                   className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-accent-foreground hover:bg-accent-hover disabled:opacity-40"
@@ -220,7 +258,7 @@ export default function ChordCharts() {
               <div className="flex justify-center py-4">
                 <LoadingSpinner />
               </div>
-            ) : totalSongs === 0 ? (
+            ) : shownTotalSongs === 0 ? (
               <p className="text-sm text-muted">
                 No tunes yet. Import a playlist below to get started.
               </p>
@@ -373,7 +411,7 @@ export default function ChordCharts() {
             </>
           ) : (
             <p className="text-center text-sm text-muted">
-              {totalSongs === 0
+              {shownTotalSongs === 0
                 ? "Import a playlist to see your first chart here."
                 : "Press the search icon to find a tune."}
             </p>
@@ -420,13 +458,6 @@ export default function ChordCharts() {
             setConfirmClear(false);
           }}
           onCancel={() => setConfirmClear(false)}
-        />
-      )}
-
-      {showEditor && (
-        <ChordChartEditor
-          onSave={(song) => importSongs([song], song.title)}
-          onClose={() => setShowEditor(false)}
         />
       )}
     </ToolLayout>

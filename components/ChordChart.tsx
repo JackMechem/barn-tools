@@ -44,7 +44,7 @@ import {
 export const chordFont = localFont({ src: "./fonts/petaluma/PetalumaScript.otf" });
 // Only ever used for the two SMuFL chord-symbol glyphs `QualityText` substitutes in — never applied
 // to a whole chord label the way `chordFont` is.
-const chordSymbolFont = localFont({ src: "./fonts/petaluma/Petaluma.otf" });
+export const chordSymbolFont = localFont({ src: "./fonts/petaluma/Petaluma.otf" });
 
 // The two `prettyQuality` substitution glyphs `PetalumaScript` doesn't have real glyphs for,
 // mapped to `Petaluma`'s own SMuFL "chord symbols" glyphs instead of falling back to whatever
@@ -94,7 +94,7 @@ const BASS_SIZE = "1.1rem";
 const REPEAT_SIZE = "1.75rem";
 const SYMBOL_SIZE = "1.1rem";
 const SMALL_LABEL_SIZE = "0.8rem";
-const BADGE_SIZE = "0.75rem";
+export const BADGE_SIZE = "0.75rem";
 const TIME_SIG_SIZE = "1.75rem";
 
 // A short chart is allowed to scale *up* past its natural size to better fill the page (a 4-bar
@@ -208,8 +208,20 @@ export default function ChordChart({
       whatever space is left over in the non-binding dimension.
     - `fitHeight={false}`: fits *width only* (always scales to exactly fill the available width,
       up to `MAX_SCALE`) and reports the resulting *height* back onto its own box, so the chart is
-      never narrower than its container just because it happens to be tall. */
-function PageFit({
+      never narrower than its container just because it happens to be tall. Horizontally centered
+      (`left-1/2` + `translateX(-50%)`, the same technique `fitHeight={true}` already uses for its
+      own centering, just without the vertical half) rather than left-anchored, so hitting the
+      `MAX_SCALE` cap in a container wide enough to need it — the common case for
+      `ChordChartEditor.tsx`'s own, wider page, rare for the real chart's own `max-w-2xl`-capped
+      container — doesn't leave the result sitting flush left with empty space stranded on the
+      right.
+
+    Exported for `ChordChartEditor.tsx`'s own bar grid (`fitHeight={false}`, the same mode the
+    normal in-page chart view uses) — its bars are fixed-size regardless of which one is currently
+    an `<input>`, so the scale factor stays stable while typing; a `transform: scale()` doesn't
+    interfere with clicking into or typing in a scaled `<input>` (the browser maps click
+    coordinates through the transform correctly on its own). */
+export function PageFit({
   children,
   fitHeight,
 }: {
@@ -269,8 +281,8 @@ function PageFit({
     >
       <div
         ref={contentRef}
-        className="absolute left-0 top-0 inline-flex flex-col items-start gap-3 p-3"
-        style={{ transform: `scale(${scale})`, transformOrigin: "top left" }}
+        className="absolute left-1/2 top-0 inline-flex flex-col items-start gap-3 p-3"
+        style={{ transform: `translateX(-50%) scale(${scale})`, transformOrigin: "top center" }}
       >
         {children}
       </div>
@@ -278,7 +290,10 @@ function PageFit({
   );
 }
 
-function groupRows(bars: Bar[], barsPerRow: number): Bar[][] {
+/** Exported for `ChordChartEditor.tsx`'s own bar grid, so "break into rows of `barsPerRow`,
+    starting a fresh row early at a `newRow` bar" is the exact same rule in both places — pure
+    logic, no rendering, so reusing it directly carries no risk to this file's own display path. */
+export function groupRows(bars: Bar[], barsPerRow: number): Bar[][] {
   const rows: Bar[][] = [];
   let current: Bar[] = [];
   for (const bar of bars) {
@@ -312,18 +327,37 @@ function endingSpans(
   return spans;
 }
 
-function Row({
+/** Exported for `ChordChartEditor.tsx`, which reuses this wholesale for its own bar grid (rather
+    than a second approximation of it) via three optional additions that only it ever passes:
+    `renderBarContent` lets a caller override what's shown *inside* one specific bar (its own
+    "this bar is being typed into right now, show an `<input>` instead" case) while every other
+    bar still renders through the normal `BarContent` path; `renderSection` is the same idea for
+    the section badge specifically (its own "type the section name right where it'll actually
+    appear" editing); `trailing` is one more raw grid item appended after the row's own bars (its
+    own "Add bar" button, placed in whatever grid column is left over after the last bar — only
+    ever passed for the actual last row). None of the three is passed from this file's own
+    `ChordChart` below, so its own rendering is completely unaffected by any of them existing. */
+export function Row({
   bars,
   barsPerRow,
   isFirstRow,
   isLastRow,
   timeSignature,
+  renderBarContent,
+  renderSection,
+  trailing,
 }: {
   bars: Bar[];
   barsPerRow: number;
   isFirstRow: boolean;
   isLastRow: boolean;
   timeSignature?: { top: number; bottom: number };
+  renderBarContent?: (bar: Bar, indexInRow: number) => React.ReactNode;
+  /** Same idea as `renderBarContent`, for the section badge specifically — only ever consulted
+      for the row's own first bar (`i === 0`), the one spot a badge can ever appear. Returning
+      `undefined` falls back to the normal badge. */
+  renderSection?: (bar: Bar, indexInRow: number) => React.ReactNode;
+  trailing?: React.ReactNode;
 }) {
   // The section letter (A, B, ...) is drawn inside the row's first bar rather than in a gutter
   // column of its own — that gutter used to eat into the width available to the bars themselves,
@@ -370,8 +404,11 @@ function Row({
           isLast={i === bars.length - 1}
           isFirstOfChart={isFirstRow && i === 0}
           isLastOfChart={isLastRow && i === bars.length - 1}
+          content={renderBarContent?.(bar, i)}
+          sectionContent={i === 0 ? renderSection?.(bar, i) : undefined}
         />
       ))}
+      {trailing}
     </div>
   );
 }
@@ -386,6 +423,8 @@ function BarCell({
   isLast,
   isFirstOfChart,
   isLastOfChart,
+  content,
+  sectionContent,
 }: {
   bar: Bar;
   section?: string;
@@ -396,6 +435,14 @@ function BarCell({
   isLast: boolean;
   isFirstOfChart: boolean;
   isLastOfChart: boolean;
+  content?: React.ReactNode;
+  /** Overrides the section badge itself (not just its text) — `ChordChartEditor.tsx`'s own "type
+      the section name right where it'll actually appear" editing, an `<input>` shown in the exact
+      same corner the plain badge otherwise occupies. `undefined` (the default every other caller
+      gets) falls back to the normal badge; passing anything else, including `null`, replaces it
+      outright — so a caller can also suppress the badge entirely without also going through
+      `section` itself. */
+  sectionContent?: React.ReactNode;
 }) {
   // iReal Pro always draws the chart's very opening barline thick/doubled, independent of
   // whether that bar happens to also carry an explicit repeat-open marker — matching that here
@@ -421,14 +468,16 @@ function BarCell({
     >
       {bar.startRepeat && <RepeatDots side="left" />}
       {bar.endRepeat && <RepeatDots side="right" />}
-      {section && (
-        <span
-          className="absolute left-0.5 top-0.5 flex items-center justify-center rounded bg-accent font-bold text-accent-foreground"
-          style={{ fontSize: BADGE_SIZE, width: "1.7em", height: "1.7em" }}
-        >
-          {section}
-        </span>
-      )}
+      {sectionContent !== undefined
+        ? sectionContent
+        : section && (
+            <span
+              className="absolute left-0.5 top-0.5 flex h-[1.6em] min-w-[1.6em] items-center justify-center whitespace-nowrap rounded bg-accent px-1 font-bold leading-none text-accent-foreground"
+              style={{ fontSize: BADGE_SIZE }}
+            >
+              {section}
+            </span>
+          )}
       {(bar.segno || bar.coda) && (
         <span
           className={`absolute right-0.5 top-0.5 text-accent ${chordSymbolFont.className}`}
@@ -439,7 +488,7 @@ function BarCell({
         </span>
       )}
       {timeSignature && <TimeSignatureGlyph timeSignature={timeSignature} />}
-      <BarContent bar={bar} />
+      {content ?? <BarContent bar={bar} />}
       {bar.directive && (
         <span
           className="absolute -bottom-5 right-0 whitespace-nowrap italic text-muted"
@@ -455,9 +504,8 @@ function BarCell({
 /** The stacked top/bottom time signature (e.g. "4" over "4") drawn just before the chart's very
     first chord, the way iReal Pro always shows it, sitting as an ordinary flex sibling of the
     chord label inside that one bar cell — it costs that bar some of its own room for the chord
-    symbol rather than adding an extra column. Exported for `ChordChartEditor.tsx`'s own bar grid,
-    so its first bar shows the same time-signature glyph a real rendered chart's does. */
-export function TimeSignatureGlyph({
+    symbol rather than adding an extra column. */
+function TimeSignatureGlyph({
   timeSignature,
 }: {
   timeSignature: { top: number; bottom: number };
@@ -488,7 +536,11 @@ function RepeatDots({ side }: { side: "left" | "right" }) {
   );
 }
 
-function BarContent({ bar }: { bar: Bar }) {
+/** Exported for `ChordChartEditor.tsx`, which wraps this in its own clickable button (to activate
+    a bar for editing) around every bar that isn't the one currently being typed into — reusing
+    this directly rather than a second "blank cell / % / chord labels" render path to keep in
+    sync. */
+export function BarContent({ bar }: { bar: Bar }) {
   if (bar.content.kind === "repeat") {
     return (
       <span
@@ -519,9 +571,8 @@ function BarContent({ bar }: { bar: Bar }) {
     stops overflowing the bar. Renders at natural size (no transform) until it actually doesn't
     fit. Orthogonal to `PageFit` above (which scales the *whole chart*) — this handles the
     narrower case of one bar with more chords crammed into it than its own fixed `COL_WIDTH` can
-    comfortably hold at natural size. Exported for `ChordChartEditor.tsx`'s own bar grid, which
-    reuses this same overflow behavior for a bar with several typed chords in it. */
-export function FitChordRow({ children }: { children: React.ReactNode }) {
+    comfortably hold at natural size. */
+function FitChordRow({ children }: { children: React.ReactNode }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
@@ -565,10 +616,7 @@ const ACCIDENTAL_GLYPH: Record<"b" | "#", string> = { b: "♭", "#": "♯" };
 // resolve against whatever font-size this label happens to inherit — not against the root's own
 // (much larger) size — which is exactly why they used to stay illegibly small no matter how big
 // that `em` value got. Explicit, independently-set sizes sidestep that entirely.
-//
-// Exported for `ChordChartEditor.tsx`'s own bar grid, so a bar not currently being typed into
-// renders through this exact same function — not a second approximation of it.
-export function ChordLabel({ slot }: { slot: ChordSlot }) {
+function ChordLabel({ slot }: { slot: ChordSlot }) {
   if (slot.kind === "nc") {
     return (
       <span

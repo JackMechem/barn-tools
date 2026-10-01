@@ -689,14 +689,304 @@ what exists, what's next, and the honest state of what's been verified.
   `eslint-disable` comments were safe to remove rather than masking a real regression), and
   `next build` all pass; `git diff --stat` confirms `GuessTheChord.tsx` only shrank (its own
   keypad array and JSX replaced by one `<ChordSymbolKeypad>` call) rather than having any of its
-  actual answer-grading logic touched. **Not verified**, the same as this whole tool's UI: whether
-  clicking between bars, typing, and using the keypad actually feels like "typing directly on the
-  chart" the way the request pictured it, whether the display-mode `ChordLabel` rendering (natural,
-  unscaled size — this grid deliberately doesn't run through `PageFit`'s scale-to-fit the way a
-  real rendered chart does, so it can stay a stable, always-editable size instead of shrinking for
-  a long chart) reads clearly at that size inside the modal, and whether Enter-to-advance and the
-  keypad's cursor-insertion behave correctly across real browsers and real keyboards — this
-  sandbox still has no way to click through any of it.
+  actual answer-grading logic touched. (The "two-column bar grid / live preview reads through
+  `ChordLabel`/`FitChordRow` at natural unscaled size" description here was itself superseded by
+  the next round below — see that one for the current design.)
+
+  **Full page, sections, repeat barlines, codas, and genuine 4-bars-per-row** (a direct follow-up:
+  "the create chord chart should not be a popup, it should take up the entire chord charts view...
+  make it so I can have different sections (A, B, intro, Verse, etc...)... repeats... 4 bars per
+  line just like how the regular charts show... I need to be able to put codas in"). Four changes,
+  one underlying architectural decision:
+  - **Not a popup.** `ChordCharts.tsx` now has an early `if (showEditor) return <ToolLayout...>
+    <ChordChartEditor .../></ToolLayout>` branch that replaces its entire normal content area
+    (Tunes/Import/Create/Display + the selected chart) with the builder, full width, rather than
+    layering a `fixed inset-0` modal over it. `ChordChartEditor` itself lost its backdrop/panel
+    shell entirely — it's now a plain in-page section.
+  - **Sections, repeat barlines, and codas** — `Bar.section`/`startRepeat`/`endRepeat`/`coda` were
+    always part of `lib/iRealPro.ts`'s own type (every pasted iReal chart can already carry them),
+    just nothing in this app could ever *write* them before now. Each `EditableBar` in the builder
+    gained those four fields (plus `isRepeatBar` for the "%" repeat-previous-bar mark — added
+    alongside repeat barlines since the request named "repeats" twice, plausibly meaning both the
+    `:‖` barline kind and the `%` mark, and both were equally cheap to add once the data model
+    already supported them) and a small "Bar N" toolbar beneath the grid, bound to whichever bar
+    is currently active, with a Section text field and toggle buttons for the rest — not per-cell
+    controls, since there's no room for five extra toggles inside a single `COL_WIDTH`-wide cell.
+    `toRealBar(eb)` converts one `EditableBar` into the exact same `Bar` shape a parsed iReal chart
+    already produces; setting a `section` also sets `newRow: true`, the same thing a real `*A`/`*B`
+    section token forces during parsing, so a new section always starts a fresh row here too.
+  - **Genuine 4-bars-per-row, "just like the regular charts show."** The builder's bar grid used
+    to be a loosely wrapping `flex flex-wrap` row (reflowing however many bars fit the available
+    width); it's now built from `ChordChart.tsx`'s own `groupRows`/`Row`/`BarCell`/`BarContent` —
+    the *exact* components the real chart renders with — reused wholesale rather than a second
+    approximation of them, via two small, backward-compatible additions those take only when a
+    caller actually passes them (`ChordChart.tsx`'s own top-level component never does, so its own
+    rendering is completely unaffected): `Row` gained an optional `renderBarContent?: (bar, i) =>
+    ReactNode` (override what's drawn *inside* one specific bar — the builder's "this bar is being
+    typed into right now, show an `<input>` instead" case) and `trailing?: ReactNode` (one more
+    raw grid item appended after a row's own bars — the builder's "Add bar" button, placed in
+    whatever grid column is actually left over after the last bar, only ever passed for the real
+    last row); `BarCell` gained a matching `content?: ReactNode` prop (`content ?? <BarContent
+    bar={bar} />`). The practical effect: sections, repeat-barline dots, the coda symbol, and the
+    time signature on bar 1 now all render through the *same* code that draws a real chart, not a
+    hand-rebuilt approximation of each — reusing `BarContent` specifically (now exported) also
+    means a bar's "%" repeat-mark Just Works with zero special-casing in the builder itself, since
+    `BarContent` already handles `content.kind === "repeat"` on its own. `ChordLabel`/
+    `FitChordRow`/`TimeSignatureGlyph` had briefly been exported for the *previous* round's own
+    (now-replaced) grid — reverted back to private once nothing outside `ChordChart.tsx` needed
+    them directly anymore, confirmed by grepping for every usage first rather than assuming;
+    `REPEAT_SIZE`/`SYMBOL_SIZE`/`BADGE_SIZE` got the same treatment after briefly being exported
+    "just in case" during this round and turning out unused too — same `grep` check both times,
+    not guessed.
+
+  The "Add bar" button still sits immediately after the last bar when that row has room for it
+  (an explicit grid item at `gridColumn: lastRowBars.length + 1`, via `trailing`); when the last
+  row is already full (exactly a multiple of 4 bars), it falls back to a plain button below the
+  whole grid instead, since there's no column left to put it in.
+
+  A real correctness bug was caught in review and fixed before use, the same way the previous
+  round's `removeBar` one was: toggling the new "Repeat bar (%)" option on had also been set to
+  `disable` the active bar's `<input>` — which, being a disabled `<input>`, silently stops
+  receiving *any* keyboard events at all, including the Enter-to-advance-to-the-next-bar flow this
+  tool otherwise relies on as its main way to move through a chart quickly. Fixed by leaving the
+  input enabled (just visually dimmed, with a placeholder noting the typed text is ignored while
+  "%" is on) rather than disabling it — `toRealBar` already prioritizes `isRepeatBar` over
+  whatever's typed, so nothing is lost functionally by leaving it editable, and keyboard
+  navigation keeps working. A React Compiler lint error was also hit and fixed in the same pass
+  (`react-hooks/immutability`'s "Cannot reassign variable after render completes," on a `let
+  rowStart` being mutated across a `.map()` to compute each row's global starting bar index) —
+  rewritten as a pure `reduce` instead, verified against a synthetic script (run against
+  `groupRows` itself, copied verbatim rather than imported, since that file can't be loaded
+  standalone outside Next/React) checking four cases: a plain 6-bar chart splitting into rows of
+  4 and 2 with the right starting offsets; a section set mid-row correctly forcing an early break
+  and landing the section label on the right bar; an exactly-4-bar chart correctly *not* having
+  room for the add-button in its own row; and a 5-bar chart correctly having room for it in the
+  second row.
+
+  Verified: `tsc`, `eslint` (zero warnings, including the compiler-lint fix above), and
+  `next build` all pass; the row-grouping/offset math is confirmed correct by the synthetic script
+  above. **Not verified**, the same as everything else in this tool's UI: whether building a chart
+  with sections/repeats/codas, saving it, and seeing it rendered back through the real
+  (non-editable) `ChordChart` actually looks right end to end — this sandbox still has no way to
+  click through any of it, and that round-trip specifically (builder → saved song → real chart
+  render) has never been seen, only reasoned through from both sides independently each rendering
+  the same `Bar` shape correctly on their own.
+
+  **Fill width** (a direct follow-up with a screenshot: the grid sat at its small natural size,
+  left-aligned, with a wide empty gap to its right). Deliberate at the time — the previous round's
+  own comment on this grid said it "doesn't run through `PageFit`'s scale-to-fit... so it can stay
+  a stable, always-editable size" — but that traded away matching how the real chart actually
+  looks, which is what "4 bars per line just like how the regular charts show" (the *previous*
+  request) was already asking for. Fixed by wrapping the grid in `PageFit` itself
+  (newly exported, `fitHeight={false}` — the exact same mode the normal, non-maximized `ChordChart`
+  view already uses to fill its own container's width), rather than leaving it at natural
+  `COL_WIDTH`-per-bar size. The "stays stable while typing" concern turned out not to be a real
+  tradeoff: every bar cell is the same fixed natural size regardless of whether it's currently
+  showing an `<input>` or rendered chord symbols, so the grid's *natural* width never changes as
+  `activeIndex` changes — meaning the computed scale factor doesn't change either, so there's no
+  jarring re-scale when clicking between bars, exactly as hoped going in rather than something
+  separately verified. The "Add bar" fallback button (the one shown below the grid when the last
+  row is already full) stays *outside* `PageFit`'s scaled box, as a plain sibling — same reasoning
+  as the real chart keeping its own Maximize button outside the scaled area, so it stays one
+  consistent, clickable size regardless of how much the chart itself is scaled up or down. `tsc`,
+  `eslint`, and `next build` all pass. **Not verified**: whether a `transform: scale()`'d `<input>`
+  genuinely behaves correctly for typing/clicking/cursor placement in a real browser — CSS
+  transforms are supposed to leave hit-testing and focus entirely alone (the browser maps click
+  coordinates through the transform matrix on its own, standard behavior, not something special
+  being relied on here), but "supposed to" isn't "confirmed," and this sandbox has no way to
+  actually click into a scaled input and find out.
+
+  **Centering, the section badge, and one combined toolbar** (a direct follow-up with a
+  screenshot): three separate fixes.
+  - **Centering.** The previous round's `PageFit` fix made the grid *fill* the available width up
+    to `MAX_SCALE`, but never addressed what happens once that cap is actually hit — `PageFit`'s
+    `fitHeight={false}` content was still `left: 0`-anchored, so a scale capped below "fill the
+    whole box" left it flush left with the leftover space stranded on the right, exactly the
+    screenshot. Fixed by switching to `left-1/2` + `transform: translateX(-50%) scale(s)` — not a
+    new technique, the *exact* same `left-1/2` + `translate(-50%, -50%) scale(s)` composition
+    `fitHeight={true}` already uses one branch up, just without the vertical half. Considered (and
+    rejected) switching `contentRef` out of `position: absolute` entirely in favor of ordinary flex
+    centering, which would have been simpler to reason about — but that div being `absolute` is
+    exactly what lets `fitHeight={false}` report an *explicit*, JS-computed height back onto its
+    own box in the first place (`contentHeight` state); a non-absolute child would hand layout back
+    to the browser, which sizes against the *unscaled* natural height, not the scaled one — wrong
+    in both directions (too tall if shrinking, clipped if growing). Kept `absolute`, fixed only the
+    anchor.
+  - **The section badge.** The real chart's own section-badge CSS (`BarCell`, unchanged since this
+    badge was built for single-letter `*A`/`*B` markers off a real iReal chart, which is all it
+    ever had to render before free-text sections existed anywhere in this app) was a fixed
+    `1.7em × 1.7em` square — exactly wide enough for one character, not "Intro." Typing a real word
+    into it rendered truncated/overlapping text, the screenshot's "ntro." Fixed by dropping the
+    fixed `width` in favor of `min-w-[1.6em]` + horizontal padding + `whitespace-nowrap`, so it
+    still reads as a small square badge for a single letter but genuinely grows to fit a longer
+    word instead of clipping it. This is a `BarCell` fix, not an editor-only one — it benefits a
+    real pasted iReal chart too, if one of those ever has a longer section name, not just charts
+    built here.
+  - **One combined toolbar, and typing the section name on the chart itself.** The Bar-N toolbar
+    (section/repeat/coda) and the chord-symbol keypad used to be two separate boxes; they're now
+    one `bg-surface` panel, per "put all the things... all in the section with the chord
+    qualit[ies]." Separately, the toolbar's own free-text "Section" field is gone — replaced by a
+    single "Add section" / "Remove section" toggle, per "there's just a button to add section
+    title and you type where the section title actually is in the chart." Typing itself now
+    happens via a *third* optional addition `Row`/`BarCell` take only for this editor
+    (`renderSection`, alongside the existing `renderBarContent`/`trailing`): when the active bar
+    has a section, an `<input>` replaces the plain badge *in the badge's own on-chart position*
+    rather than in a disconnected form field — the same "type directly on the chart" principle this
+    whole tool is built around, now extended to section names. A new `hasSection: boolean` field on
+    `EditableBar`, kept separate from the `section` text itself, is what actually makes this work:
+    clicking "Add section" sets `hasSection: true` *immediately*, forcing the row break
+    (`toRealBar`'s `newRow`) before a single character has been typed — without that, the bar
+    wouldn't yet be the first bar of its own row, and the inline input (which, like the real badge,
+    only ever renders on a row's first bar) would have nowhere correct to appear the instant it's
+    added. Leaving the inline input blank and clicking elsewhere (its own `onBlur`) auto-reverts
+    `hasSection` back to `false` instead of leaving a label-less, invisible row break behind.
+    Enter/Escape in the section input confirm-and-blur rather than bubbling up to the builder's own
+    Escape-closes-everything handler, the same reasoning as the chord input's own Escape handling.
+
+  Verified with a synthetic script (run against `toRealBar`/`groupRows`, both copied verbatim
+  rather than imported, same reason as every other test in this file that touches `ChordChart.tsx`)
+  confirming the specific behavior the whole section-editing design depends on: setting
+  `hasSection` with still-empty text forces the row break immediately, not just once text exists;
+  typing a label afterward doesn't change the row shape, only the text; "Remove section" fully
+  clears both fields (not just blanking the text) and merges the row back into the normal 4-per-row
+  flow; and a section set on bar 0 specifically doesn't fragment the first row (nothing precedes it
+  to break from), matching how a real chart's own first bar already behaves. `tsc`, `eslint`, and
+  `next build` all pass. **Not verified**: how any of this actually looks and feels in a real
+  browser, same as this entire tool — in particular, whether the inline section `<input>`'s
+  deliberately small, badge-matching size is usable for actually typing into on a touchscreen, and
+  whether the auto-focus-on-add / auto-cancel-on-empty-blur sequence feels natural rather than
+  surprising when actually clicked through.
+
+  **Two more fixes from the same follow-up round, caught against an actual screenshot**: the
+  inline section `<input>` added above still had a *fixed* `w-16` width left over from an earlier
+  draft, unlike the read-only badge's own `min-w-[1.6em]` auto-sizing right next to it — rendering
+  as a conspicuously wide, mostly-empty orange pill for anything shorter than "Intro" (a single
+  letter "F," the actual screenshot). Fixed by dropping the fixed width for the HTML `size`
+  attribute (character-count-based intrinsic sizing, not a CSS width) plus the same `min-w-[1.6em]`
+  the badge already uses, so it now genuinely grows with what's typed instead of a flat pill.
+  Separately: Start repeat/End repeat had no glyph preview at all (just a plain text label), unlike
+  Coda and "%" right next to them — and per the request, all four should look like the keypad's own
+  glyph-on-top/caption-below keys, not the plain text pill they'd been styled as. Found the actual
+  SMuFL glyphs for this — `repeatLeft` (U+E040) and `repeatRight` (U+E041), real engraved
+  start/end repeat-barline marks, not a text stand-in — confirmed present in the bundled
+  `Petaluma.otf` (`opentype.js` against the real font file, the same verification method used for
+  every other SMuFL glyph this app relies on, not assumed from the spec alone) before using them.
+  `BarToggle` now branches on whether a `glyph` was passed: with one (all four repeat/coda/%
+  toggles), it renders the same stacked glyph-on-top/caption-below shape
+  `ChordSymbolKeypad`'s own keys use; without one ("Add/Remove section," which has no symbol of
+  its own to show), it stays the plain text-only pill. `tsc`, `eslint`, and `next build` all pass;
+  the two new codepoint constants were confirmed to actually decode to U+E040/U+E041 via a direct
+  script reading the real file bytes, not just assumed correct from how they were typed. **Not
+  verified**: how the resized section input and the four restyled toggle buttons actually look
+  once rendered — this sandbox still has no way to see either.
+
+  **The glyph-toggle restyle made things worse, not better** (a direct follow-up with two
+  screenshots: "this section just looks bad and is bad UX... also theres too much padding on the
+  right of the section title"). Two real defects, both from the previous round:
+  - `BarToggle` had branched into *two different button shapes* depending on whether a `glyph` was
+    passed — "Add/Remove section" stayed the original single-line pill, while Start/End
+    repeat/Coda/"%" became a taller, two-line "keypad key" shape (glyph stacked above a caption).
+    Side by side in the same row, that's a visibly mismatched set of buttons at two different
+    heights, not a redesign so much as an inconsistency the earlier change introduced — exactly
+    what got called out. Fixed by collapsing back to *one* shape for every toggle: a single-line
+    pill with an optional glyph beside the label, never above it — `BarToggle` no longer branches
+    on `glyph` at all. A thin vertical divider was also added between the section toggle and the
+    four repeat/coda/% toggles, grouping the row into two legible clusters instead of one
+    undifferentiated line of five buttons.
+  - The inline section `<input>`'s width was still being driven by the HTML `size` attribute
+    (added two rounds ago to replace an even-worse fixed `w-16`) — `size` is only ever a rough,
+    historically-per-browser approximation (based on several "0"-character widths plus its own
+    baked-in slack), nowhere near tight enough, which is exactly what the second screenshot showed
+    as visibly extra accent-colored background trailing a single-letter "A". Replaced with an
+    explicit `width: calc(Nch + 1rem)` computed directly from the typed text's own length — `ch`
+    units size against the current font's actual "0" character width, a real CSS sizing mechanism
+    rather than an attribute with implementation-defined slack, and the `+ 1rem` accounts for the
+    `px-1` padding on each side plus a little room for bold glyphs that render wider than a plain
+    "0" — considerably tighter than before without working through actual rendered measurements
+    this sandbox has no way to take.
+
+  `tsc`, `eslint`, and `next build` all pass. **Not verified**, same as every visual change in this
+  tool: whether the single consistent pill shape and the divider actually read as a coherent,
+  well-designed row once seen, and whether the `ch`-based width calculation lands as tightly as
+  intended across real fonts/browsers rather than just being *less wrong* than `size` was — this
+  sandbox still can't render either to check.
+
+  **Reversed again, this time toward the keypad's own look specifically** — a direct follow-up:
+  "start repeat, end repeat, coda, and repeat bar should be styled exactly like the accidentals in
+  the keypad are styled." `BarToggle`'s glyph case went back to `ChordSymbolKeypad`'s stacked
+  glyph-over-caption shape — but copied from the keypad's *actual* classes this time
+  (`flex flex-col items-center gap-0.5 rounded-lg px-2 py-1.5`, glyph `text-base font-semibold
+  leading-none`, caption `text-[0.6rem] leading-none`), not reconstructed from memory of what the
+  earlier (reverted) attempt looked like, so it should now match precisely rather than
+  approximately. One deliberate, noted deviation: the keypad's own keys are one-shot "insert"
+  actions with no state of their own, so their caption is always `text-muted`; these four are real
+  on/off toggles, and that grey reads poorly against the accent-colored background an active
+  toggle gets — checked the actual `--muted`/`--accent` color values in `app/globals.css` rather
+  than guessing, in both light and dark mode — so the caption only stays `text-muted` while off,
+  switching to the button's own `text-accent-foreground` once on. "Add/Remove section" is
+  untouched (no glyph of its own, and the request named the other four specifically) — back to
+  being visually a different shape from its four neighbors in the same row, which is exactly what
+  the *previous* round's fix had tried to avoid; left as-is anyway, since this request is explicit
+  about wanting the keypad's exact look for those four specifically, not uniformity across the
+  whole row as its own goal. `tsc`, `eslint`, and `next build` all pass. **Not verified**: whether
+  this now genuinely looks identical to the keypad below it, or whether "Add/Remove section"
+  sitting at a different height next to it reads as awkward again once actually seen — this
+  sandbox still has no way to render either.
+
+  **The repeat glyphs themselves turned out too tall for that size** — confirmed directly, with a
+  screenshot: `repeatLeft`/`repeatRight` (Start/End repeat's own SMuFL glyphs — real, full-height
+  barline-and-dots marks, unlike the keypad's own compact `prettyQuality` glyphs) visibly
+  overflowed the button's rounded-rectangle outline at the same `text-base` size those use. Per
+  explicit direction, fixed by adding more vertical padding (`py-1.5` → `py-2.5`) rather than
+  shrinking the glyph — applied to all four buttons in the row (Start/End repeat, Coda, "%"), not
+  just the two repeat ones, so the row stays one consistent button size rather than three short
+  buttons next to two taller ones. `tsc`, `eslint`, and `next build` all pass. **Not verified**:
+  whether `py-2.5` is actually *enough* extra room for these particular glyphs' real rendered
+  bounds, or whether Coda/"%" (which didn't have this problem) now just look slightly
+  over-padded relative to their own, more modestly-sized glyphs — this sandbox still can't render
+  any of it to check either way.
+
+  **Padding alone didn't fix it — the glyph itself was the wrong one** (reported directly: "repeat
+  symbols still over flow"). Checked what the previous round only assumed: `repeatLeft`/
+  `repeatRight`'s actual bounding box in the bundled font (`opentype.js` against the real file, not
+  guessed), and they're ~2.5x a normal glyph's height — SMuFL draws them to span most of a 5-line
+  music staff, a full engraved barline, not something meant to sit inside a small UI button at any
+  amount of padding. Fixed properly this time by switching glyphs entirely rather than padding
+  around the wrong one: `leftRepeatSmall`/`rightRepeatSmall` (U+E04C/U+E04D) are SMuFL's own
+  purpose-built compact variants, explicitly for "repeat sign within bar" use — confirmed at
+  roughly normal text-glyph proportions (comparable to the "%" toggle's own `repeat1Bar`, which
+  never had this problem) before switching, the same way every SMuFL glyph choice in this app has
+  been checked against the real font rather than assumed from the spec's glyph name alone. With the
+  actual cause fixed, the padding compensation from the previous round was reverted
+  (`py-2.5` → `py-1.5`, matching `ChordSymbolKeypad`'s own keys exactly again) — it was only ever
+  papering over the wrong glyph, not something these buttons needed on their own merits.
+  `tsc`/`eslint`/`next build` all pass, and the two new codepoints were confirmed to actually
+  decode to U+E04C/U+E04D via a direct script reading the real file bytes, the same check applied
+  to every codepoint constant added this session. **Not verified**: whether these are now
+  genuinely the right visual size next to Coda/"%"'s own glyphs, or whether a glyph swap this
+  sandbox can reason about only through bounding-box numbers actually reads correctly once seen —
+  numbers matching expectations is not the same as an eye confirming it.
+
+  **The metrics were fine; the glyph itself still didn't read as a repeat sign** (reported
+  directly, with a screenshot — `leftRepeatSmall`/`rightRepeatSmall` fit the button correctly this
+  time, size wasn't the problem anymore, but whatever they actually look like at that size clearly
+  isn't recognizable as one). Rather than try a *third* SMuFL codepoint blind — this sandbox has no
+  way to render any of them to check before shipping, which is exactly how the previous two rounds
+  both shipped something that then had to be reported back as wrong — this one sidesteps font
+  rendering entirely: a new `RepeatGlyph` component (`ChordChartEditor.tsx`) builds the icon from
+  plain CSS, a thick `bg-current` bar plus two small `bg-current` dots (ordered bar-then-dots for
+  "left"/start, dots-then-bar for "right"/end), directly mirroring the real chart's own
+  repeat-barline convention — `ChordChart.tsx`'s `RepeatDots` plus its thick border — instead of
+  approximating it through an unfamiliar engraving glyph whose actual appearance can't be checked
+  from here. `bg-current` means it still automatically follows the button's own current text color
+  (muted while off, `accent-foreground` once on), the same behavior the SMuFL glyph had. `BarToggle`'s
+  `glyph` prop is now `string | React.ReactNode` rather than just `string`, to accept this directly
+  — a string still renders through `chordSymbolFont` exactly as before (Coda and "%" are
+  untouched), while a node (`RepeatGlyph`) renders as-is. `tsc`, `eslint`, and `next build` all
+  pass. **Not verified**, same as the two attempts before it: whether this actually looks right —
+  but unlike those, this doesn't depend on a font's own rendering being legible at a given size at
+  all, only on basic CSS box/color primitives this sandbox can at least reason about with full
+  confidence, even without being able to see the result.
 - **Slow Downer** — load a local audio/video file, slow playback without pitch shift, loop
   sections, add named markers with notes, zoom/pan the waveform.
 - **Recorder** — multitrack recording: per-track clips, punch-in recording, trim/crop/repeat/move

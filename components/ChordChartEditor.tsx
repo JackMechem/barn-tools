@@ -2,37 +2,138 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  BADGE_SIZE,
   BAR_HEIGHT,
+  BarContent,
   chordFont,
-  ChordLabel,
+  chordSymbolFont,
   COL_WIDTH,
-  FitChordRow,
+  groupRows,
+  PageFit,
   QUALITY_SIZE,
-  TimeSignatureGlyph,
+  Row,
 } from "@/components/ChordChart";
 import ChordSymbolKeypad from "@/components/ChordSymbolKeypad";
 import NumberField from "@/components/NumberField";
 import { PlusIcon, TrashIcon } from "@/components/tools";
 import { encodeChartString } from "@/lib/chartString";
-import { parseBarSlots, type IRealSong } from "@/lib/iRealPro";
+import { parseBarSlots, type Bar, type IRealSong } from "@/lib/iRealPro";
 
 const STARTING_BARS = 4;
+const BARS_PER_ROW = 4;
 
-/** A from-scratch chord chart builder — deliberately simple (a flat list of bars, no repeats,
-    endings, sections, or directives the way a pasted iReal chart can have) rather than a full
-    editor for every notation feature `ChordChart.tsx` can render. Typing happens directly on the
-    chart itself, the same way a maximized chart looks: bars sit in the same fixed-size,
-    barlined grid `ChordChart.tsx` renders (`COL_WIDTH`/`BAR_HEIGHT`, the same Petaluma font,
-    the same `ChordLabel`/`FitChordRow`/`TimeSignatureGlyph` those exports are), so there's no
-    separate "preview" pane mirroring a plain form — the bars *are* the preview, live, the moment
-    you click away from one. Each bar is typed in the exact iReal-style shorthand this app already
-    uses everywhere else (Guess the Chord's chord bank, every pasted chart) — `parseBarSlots`, not
-    a separate per-field chord picker — plus a small symbol keypad (`ChordSymbolKeypad`, shared
-    with Guess the Chord's own answer field) for the marks that aren't obvious to type by hand. A
-    song built here can be saved straight into the library (the same `importSongs` "Import a
-    playlist" itself calls, in a playlist named after the chart's own title) or exported as a
-    `jackshed://` chart link (`lib/chartString.ts`) to share or re-import elsewhere — the only two
-    ways a chart leaves this modal. */
+/** A thick bar plus two dots — the Bar-N toolbar's Start/End repeat toggle icon, built from plain
+    CSS rather than a font glyph. Two SMuFL codepoints were tried here first: `repeatLeft`/
+    `repeatRight` (the actual full engraved barline) turned out to be drawn ~2.5x a normal glyph's
+    height — meant to span most of a 5-line staff, not sit in a small UI icon — so they overflowed
+    the button regardless of padding; `leftRepeatSmall`/`rightRepeatSmall` (SMuFL's own compact,
+    "within a bar" variants, correctly proportioned by their own bounding box) fit the button fine
+    but, reported directly with a screenshot, didn't actually read as a recognizable repeat sign at
+    this size — apparently correct metrics don't guarantee a legible result, and this sandbox has
+    no way to render either one to check before shipping it. A hand-built icon sidesteps font
+    rendering entirely: `bg-current` on both pieces means it automatically follows the button's own
+    current text color (muted while off, `accent-foreground` once on) the same way the SMuFL
+    glyphs did, and the bar+dots shape directly mirrors the real chart's own repeat-barline
+    convention (`ChordChart.tsx`'s `RepeatDots` plus its thick border) instead of approximating it
+    through an unfamiliar engraving glyph. */
+function RepeatGlyph({ side }: { side: "left" | "right" }) {
+  const bar = <span aria-hidden className="h-4 w-[3px] shrink-0 rounded-sm bg-current" />;
+  const dots = (
+    <span aria-hidden className="flex shrink-0 flex-col gap-[3px]">
+      <span className="h-[3px] w-[3px] rounded-full bg-current" />
+      <span className="h-[3px] w-[3px] rounded-full bg-current" />
+    </span>
+  );
+  return (
+    <span className="flex items-center gap-1">
+      {side === "left" ? (
+        <>
+          {bar}
+          {dots}
+        </>
+      ) : (
+        <>
+          {dots}
+          {bar}
+        </>
+      )}
+    </span>
+  );
+}
+
+type EditableBar = {
+  text: string;
+  /** Whether this bar starts a section at all — separate from `section` itself (the typed label)
+      so clicking "Add section" can force the row break *immediately*, before any text has been
+      typed, which is what actually makes "type the section name right where it'll appear" work:
+      the bar needs to already be the first bar of its own row (see `toRealBar`'s own `newRow`)
+      before the inline editor meant to sit in that position has anywhere correct to sit. */
+  hasSection: boolean;
+  section: string;
+  startRepeat: boolean;
+  endRepeat: boolean;
+  coda: boolean;
+  /** The "%" mark — repeats the previous bar's chord instead of whatever's typed here. */
+  isRepeatBar: boolean;
+};
+
+function blankBar(): EditableBar {
+  return {
+    text: "",
+    hasSection: false,
+    section: "",
+    startRepeat: false,
+    endRepeat: false,
+    coda: false,
+    isRepeatBar: false,
+  };
+}
+
+/** The exact same `Bar` shape every pasted iReal chart already produces — this is what finally
+    gives the from-scratch builder access to the same section/repeat/coda fields `ChordChart.tsx`
+    could always *render*, just with nothing in this app able to *write* them until now. A bar
+    with `hasSection` forces `newRow` (the same thing a real `*A`/`*B` section token does when
+    parsing an iReal chart — see `lib/iRealPro.ts`'s own `tokenizeChart`), so adding one always
+    starts a fresh row here too, the same as it would in a real chart — even before any section
+    text has actually been typed, which is what lets the inline section editor (below) always find
+    itself in the right spot the instant it's added. */
+function toRealBar(eb: EditableBar): Bar {
+  const bar: Bar = {
+    content: eb.isRepeatBar ? { kind: "repeat" } : { kind: "chords", slots: parseBarSlots(eb.text) },
+  };
+  if (eb.hasSection) {
+    bar.section = eb.section.trim();
+    bar.newRow = true;
+  }
+  if (eb.startRepeat) bar.startRepeat = true;
+  if (eb.endRepeat) bar.endRepeat = true;
+  if (eb.coda) bar.coda = true;
+  return bar;
+}
+
+/** A from-scratch chord chart builder, taking up the whole Chord Charts page while it's open
+    (`ChordCharts.tsx` swaps its normal library+chart view out for this entirely, rather than
+    showing it as a popup over them) rather than a small modal. Typing happens directly on the
+    chart itself: the bar grid below is built from `ChordChart.tsx`'s own `Row`/`BarCell` — the
+    *exact* components the real chart renders with, reused wholesale via three small additions
+    those take just for this (`renderBarContent`, `renderSection`, `trailing` — see their own
+    comments in `ChordChart.tsx`) rather than a second approximation of them — so sections, repeat
+    barlines, codas, and the fixed 4-bars-per-row layout all look and behave *exactly* like a real
+    rendered chart, because they're drawn by the same code that draws one. The one bar currently
+    being typed into shows a plain-text `<input>` (raw shorthand, not auto-converted into pretty
+    symbols mid-keystroke, same reasoning as every other typed-text field in this app); every
+    other bar renders through the real `BarContent`, wrapped in a button only so clicking it
+    activates that bar. A section label works the same way: "Add section" (in the Bar N toolbar,
+    below) marks the active bar as a section start immediately (so it becomes the first bar of its
+    own row right away), and an `<input>` appears *in the badge's own spot on the chart* — not a
+    separate form field — for typing the actual name right where it'll be read. Start/end repeat,
+    coda, and the "%" repeat-bar mark live in that same toolbar alongside Section, together with
+    the chord-symbol keypad in one combined panel below the grid (not two separate ones) — there's
+    no room for five extra per-cell toggles inside a single `COL_WIDTH`-wide bar, so none of this
+    is on the cells themselves. A song built here can be saved straight into the library (the same
+    `importSongs` "Import a playlist" itself calls, in a playlist named after the chart's own
+    title) or exported as a `jackshed://` chart link (`lib/chartString.ts`) to share or re-import
+    elsewhere. */
 export default function ChordChartEditor({
   onSave,
   onClose,
@@ -46,19 +147,14 @@ export default function ChordChartEditor({
   const [key, setKey] = useState("");
   const [top, setTop] = useState(4);
   const [bottom, setBottom] = useState(4);
-  const [bars, setBars] = useState<string[]>(() => Array(STARTING_BARS).fill(""));
+  const [bars, setBars] = useState<EditableBar[]>(() =>
+    Array.from({ length: STARTING_BARS }, blankBar),
+  );
 
-  // Which bar is currently "open" — shown as a plain-text input (raw shorthand) instead of its
-  // rendered chord symbols, and where the keypad inserts. Persists once set (clicking elsewhere
-  // on the page, e.g. the Title field, doesn't quietly revert it) — only clicking a *different*
-  // bar, adding one, or stepping to the next with Enter ever moves it. Always a valid index, never
-  // `null`: there's always exactly one "current" bar, the same way a text cursor always sits
-  // somewhere, so the keypad always has somewhere to insert into.
+  // Which bar is currently "open" for typing — see the same field's own comment in the previous
+  // version of this file (still accurate): always a valid index, never `null`, persists once set.
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  // Set right before a bar is added or a different one is clicked into; a `useEffect` (below)
-  // focuses that bar's <input> once it's actually rendered as one (it doesn't exist in the DOM
-  // yet the same tick `setActiveIndex` is called), then clears this.
   const focusIndexRef = useRef<number | null>(null);
 
   const [saving, setSaving] = useState(false);
@@ -87,11 +183,11 @@ export default function ChordChartEditor({
     style: style.trim(),
     key: key.trim(),
     timeSignature: { top, bottom },
-    bars: bars.map((text) => ({ content: { kind: "chords", slots: parseBarSlots(text) } })),
+    bars: bars.map(toRealBar),
   };
 
-  function updateBar(index: number, text: string) {
-    setBars((prev) => prev.map((t, i) => (i === index ? text : t)));
+  function updateBar(index: number, patch: Partial<EditableBar>) {
+    setBars((prev) => prev.map((b, i) => (i === index ? { ...b, ...patch } : b)));
   }
 
   function activateBar(index: number) {
@@ -103,46 +199,39 @@ export default function ChordChartEditor({
     const newIndex = bars.length;
     focusIndexRef.current = newIndex;
     setActiveIndex(newIndex);
-    setBars((prev) => [...prev, ""]);
+    setBars((prev) => [...prev, blankBar()]);
   }
 
   function removeBar(index: number) {
     if (bars.length <= 1) return;
     const next = bars.filter((_, i) => i !== index);
     setBars(next);
-    // If the removed bar sat before the active one, every later bar's index shifts down by one —
-    // the active bar needs to track the *same* bar to stay on it (not just clamp to whatever now
-    // happens to sit at its old numeric index, which would silently jump to a different bar).
     setActiveIndex((i) => (index < i ? Math.min(i - 1, next.length - 1) : Math.min(i, next.length - 1)));
   }
 
-  /** Pressing Enter in the last bar adds a new one and jumps straight into it, so typing a whole
-      chart can stay a straight line of "type, Enter, type, Enter..." without reaching for the "Add
-      bar" button each time. In any other bar, Enter just jumps to the next one. Escape, deliberately,
-      does *not* bubble up to this modal's own Escape-closes-everything handler here (`stopPropagation`)
-      — it only blurs the current bar, since losing the whole chart because Escape was meant to back
-      out of one bar's edit would be a bad trade. */
   function handleBarKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
       if (index === bars.length - 1) addBar();
       else activateBar(index + 1);
     } else if (e.key === "Escape") {
+      // Deliberately doesn't bubble up to this view's own Escape-closes-the-builder handler —
+      // it only blurs the current bar, since losing an entire typed-out chart because Escape was
+      // meant to back out of one bar's edit would be a bad trade.
       e.stopPropagation();
       e.currentTarget.blur();
     }
   }
 
   /** Inserts a keypad key's text at the active bar's current cursor position — identical logic to
-      Guess the Chord's own `insertSymbol`, just targeting whichever bar is currently active instead
-      of a single fixed answer field. */
+      Guess the Chord's own `insertSymbol`, just targeting whichever bar is currently active. */
   function insertSymbol(text: string) {
     const el = inputRefs.current[activeIndex];
-    const current = bars[activeIndex] ?? "";
+    const current = bars[activeIndex]?.text ?? "";
     const start = el?.selectionStart ?? current.length;
     const end = el?.selectionEnd ?? current.length;
     const next = current.slice(0, start) + text + current.slice(end);
-    updateBar(activeIndex, next);
+    updateBar(activeIndex, { text: next });
     const pos = start + text.length;
     requestAnimationFrame(() => {
       el?.focus();
@@ -188,262 +277,384 @@ export default function ChordChartEditor({
     }
   }
 
-  return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-overlay p-4"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-label="Create a chord chart"
-        className="flex max-h-[90vh] w-full max-w-4xl flex-col gap-4 overflow-y-auto rounded-2xl bg-surface p-5 text-left text-foreground shadow-2xl shadow-black/20 sm:p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Create a chord chart</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground"
-          >
-            Close
-          </button>
-        </div>
+  const realBars = bars.map(toRealBar);
+  const rows = groupRows(realBars, BARS_PER_ROW);
+  const rowsWithOffsets = rows.reduce<{ rowBars: Bar[]; start: number }[]>((acc, rowBars) => {
+    const prev = acc[acc.length - 1];
+    const start = prev ? prev.start + prev.rowBars.length : 0;
+    return [...acc, { rowBars, start }];
+  }, []);
+  const lastRow = rowsWithOffsets[rowsWithOffsets.length - 1];
+  const addButtonFitsInGrid = lastRow !== undefined && lastRow.rowBars.length < BARS_PER_ROW;
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-muted">Title</span>
+  const activeBar = bars[activeIndex];
+
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Create a chord chart</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 rounded-2xl bg-surface p-4 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Title</span>
+          <input
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Tune name"
+            className="rounded-lg bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Composer</span>
+          <input
+            value={composer}
+            onChange={(e) => setComposer(e.target.value)}
+            placeholder="Optional"
+            className="rounded-lg bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Style</span>
+          <input
+            value={style}
+            onChange={(e) => setStyle(e.target.value)}
+            placeholder="Optional — e.g. Medium Swing"
+            className="rounded-lg bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
+        </label>
+        <div className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Key &amp; time signature</span>
+          <div className="flex items-center gap-2">
             <input
-              autoFocus
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Tune name"
-              className="rounded-lg bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder="Key — e.g. Bb"
+              className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-muted">Composer</span>
-            <input
-              value={composer}
-              onChange={(e) => setComposer(e.target.value)}
-              placeholder="Optional"
-              className="rounded-lg bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            <NumberField
+              label="Beats per bar"
+              value={top}
+              min={1}
+              max={32}
+              onChange={setTop}
+              className="w-14 rounded-lg bg-background px-2 py-2 text-center tabular-nums outline-none focus:ring-2 focus:ring-accent"
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-muted">Style</span>
-            <input
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
-              placeholder="Optional — e.g. Medium Swing"
-              className="rounded-lg bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            <span className="text-muted">/</span>
+            <NumberField
+              label="Beat unit"
+              value={bottom}
+              min={1}
+              max={32}
+              onChange={setBottom}
+              className="w-14 rounded-lg bg-background px-2 py-2 text-center tabular-nums outline-none focus:ring-2 focus:ring-accent"
             />
-          </label>
-          <div className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-muted">Key &amp; time signature</span>
-            <div className="flex items-center gap-2">
-              <input
-                value={key}
-                onChange={(e) => setKey(e.target.value)}
-                placeholder="Key — e.g. Bb"
-                className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              />
-              <NumberField
-                label="Beats per bar"
-                value={top}
-                min={1}
-                max={32}
-                onChange={setTop}
-                className="w-14 rounded-lg bg-background px-2 py-2 text-center tabular-nums outline-none focus:ring-2 focus:ring-accent"
-              />
-              <span className="text-muted">/</span>
-              <NumberField
-                label="Beat unit"
-                value={bottom}
-                min={1}
-                max={32}
-                onChange={setBottom}
-                className="w-14 rounded-lg bg-background px-2 py-2 text-center tabular-nums outline-none focus:ring-2 focus:ring-accent"
-              />
-            </div>
           </div>
         </div>
+      </div>
 
-        <div className="flex flex-col gap-2">
-          <p className="text-xs text-muted">
-            Click a bar to type its chords — <code>C^7</code>, <code>F-7</code>,{" "}
-            <code>Bb7#5/D</code>, <code>NC</code> for no chord, or two chords separated by a
-            space. Press Enter to move to the next bar.
-          </p>
-          <div className="overflow-x-auto rounded-2xl bg-background p-3">
-            <div className="flex w-max flex-wrap">
-              {bars.map((text, i) => (
-                <BarCellEditor
-                  key={i}
-                  index={i}
-                  text={text}
-                  isActive={activeIndex === i}
-                  isFirst={i === 0}
-                  isLast={i === bars.length - 1}
-                  canRemove={bars.length > 1}
-                  timeSignature={i === 0 ? { top, bottom } : undefined}
-                  onActivate={() => activateBar(i)}
-                  onChange={(t) => updateBar(i, t)}
-                  onRemove={() => removeBar(i)}
-                  onKeyDown={(e) => handleBarKeyDown(i, e)}
-                  inputRef={(el) => {
-                    inputRefs.current[i] = el;
-                  }}
-                />
-              ))}
-              <button
-                type="button"
-                onClick={addBar}
-                aria-label="Add bar"
-                title="Add bar"
-                className="flex shrink-0 items-center justify-center text-muted hover:bg-surface-hover hover:text-foreground"
-                style={{ width: "3.5rem", height: BAR_HEIGHT }}
-              >
-                <PlusIcon className="h-5 w-5" />
-              </button>
-            </div>
+      <p className="text-xs text-muted">
+        Click a bar to type its chords — <code>C^7</code>, <code>F-7</code>, <code>Bb7#5/D</code>,{" "}
+        <code>NC</code> for no chord, or two chords separated by a space. Press Enter to move to
+        the next bar. Use the row below to give the active bar a section, a repeat barline, or a
+        coda.
+      </p>
+
+      <PageFit fitHeight={false}>
+        {rowsWithOffsets.map(({ rowBars, start }, rowIdx) => {
+          const isLastRow = rowIdx === rowsWithOffsets.length - 1;
+          return (
+            <Row
+              key={rowIdx}
+              bars={rowBars}
+              barsPerRow={BARS_PER_ROW}
+              isFirstRow={rowIdx === 0}
+              isLastRow={isLastRow}
+              timeSignature={rowIdx === 0 ? { top, bottom } : undefined}
+              renderBarContent={(bar, i) => {
+                const globalIndex = start + i;
+                if (globalIndex === activeIndex) {
+                  return (
+                    <input
+                      ref={(el) => {
+                        inputRefs.current[globalIndex] = el;
+                      }}
+                      value={bars[globalIndex].text}
+                      onChange={(e) => updateBar(globalIndex, { text: e.target.value })}
+                      onKeyDown={(e) => handleBarKeyDown(globalIndex, e)}
+                      placeholder={bars[globalIndex].isRepeatBar ? "% (ignored while on)" : "C^7"}
+                      className={`w-full min-w-0 bg-transparent text-center outline-none ${
+                        bars[globalIndex].isRepeatBar ? "opacity-40" : ""
+                      } ${chordFont.className}`}
+                      style={{ fontSize: QUALITY_SIZE }}
+                    />
+                  );
+                }
+                return (
+                  <button
+                    type="button"
+                    onClick={() => activateBar(globalIndex)}
+                    className="flex h-full w-full min-w-0 items-center justify-center"
+                  >
+                    <BarContent bar={bar} />
+                  </button>
+                );
+              }}
+              renderSection={(_bar, i) => {
+                const globalIndex = start + i;
+                if (globalIndex !== activeIndex || !bars[globalIndex].hasSection) return undefined;
+                return (
+                  <input
+                    autoFocus
+                    value={bars[globalIndex].section}
+                    onChange={(e) => updateBar(globalIndex, { section: e.target.value })}
+                    onBlur={() => {
+                      if (!bars[globalIndex].section.trim()) updateBar(globalIndex, { hasSection: false });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === "Escape") {
+                        // Same reasoning as the chord input's own Escape handling — doesn't
+                        // bubble up to the builder's Escape-closes-everything handler, it just
+                        // confirms (or, if left blank, cancels) this one section label.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    placeholder="Intro"
+                    aria-label={`Bar ${globalIndex + 1} section`}
+                    className="absolute left-0.5 top-0.5 h-[1.6em] min-w-[1.6em] max-w-[8rem] rounded bg-accent px-1 text-left font-bold leading-none text-accent-foreground outline-none placeholder:text-accent-foreground/60"
+                    // The HTML `size` attribute this used before is only a rough, per-browser
+                    // approximation (historically based on the width of several "0" characters
+                    // plus its own baked-in slack) — not nearly tight enough, which is exactly
+                    // what left visibly extra background to the right of a short label like a
+                    // single-letter "A". `ch` units size against the current font's own "0"
+                    // character width directly, so this tracks the actual typed length far more
+                    // precisely; `+ 1rem` covers the `px-1` padding on each side plus a little
+                    // slack for bold glyphs that render wider than a plain "0" does.
+                    style={{
+                      fontSize: BADGE_SIZE,
+                      width: `calc(${Math.max(bars[globalIndex].section.length, 1)}ch + 1rem)`,
+                    }}
+                  />
+                );
+              }}
+              trailing={
+                isLastRow && addButtonFitsInGrid ? (
+                  <AddBarButton column={rowBars.length + 1} onClick={addBar} />
+                ) : undefined
+              }
+            />
+          );
+        })}
+      </PageFit>
+      {!addButtonFitsInGrid && (
+        <button
+          type="button"
+          onClick={addBar}
+          className="flex items-center gap-1.5 self-start rounded-lg px-2 py-1.5 text-sm font-medium text-muted hover:bg-surface-hover hover:text-foreground"
+        >
+          <PlusIcon className="h-4 w-4" />
+          Add bar
+        </button>
+      )}
+
+      {activeBar && (
+        <div className="flex flex-col gap-3 rounded-xl bg-surface p-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="shrink-0 text-xs font-semibold text-muted">Bar {activeIndex + 1}</span>
+            {activeBar.hasSection ? (
+              <BarToggle
+                label="Remove section"
+                active
+                onClick={() => updateBar(activeIndex, { hasSection: false, section: "" })}
+              />
+            ) : (
+              <BarToggle
+                label="Add section"
+                active={false}
+                onClick={() => updateBar(activeIndex, { hasSection: true })}
+              />
+            )}
+            <span aria-hidden className="h-5 w-px shrink-0 bg-background" />
+            <BarToggle
+              label="Start repeat"
+              active={activeBar.startRepeat}
+              onClick={() => updateBar(activeIndex, { startRepeat: !activeBar.startRepeat })}
+              glyph={<RepeatGlyph side="left" />}
+            />
+            <BarToggle
+              label="End repeat"
+              active={activeBar.endRepeat}
+              onClick={() => updateBar(activeIndex, { endRepeat: !activeBar.endRepeat })}
+              glyph={<RepeatGlyph side="right" />}
+            />
+            <BarToggle
+              label="Coda"
+              active={activeBar.coda}
+              onClick={() => updateBar(activeIndex, { coda: !activeBar.coda })}
+              glyph=""
+            />
+            <BarToggle
+              label="Repeat bar (%)"
+              active={activeBar.isRepeatBar}
+              onClick={() => updateBar(activeIndex, { isRepeatBar: !activeBar.isRepeatBar })}
+              glyph=""
+            />
+            <button
+              type="button"
+              onClick={() => removeBar(activeIndex)}
+              disabled={bars.length <= 1}
+              aria-label={`Remove bar ${activeIndex + 1}`}
+              className="ml-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted hover:bg-background hover:text-danger disabled:opacity-30"
+            >
+              <TrashIcon className="h-3.5 w-3.5" />
+              Remove bar
+            </button>
           </div>
           <ChordSymbolKeypad onInsert={insertSymbol} />
         </div>
+      )}
 
-        {error && <p className="text-sm text-danger">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
-        {exported && (
-          <div className="flex flex-col gap-1.5 rounded-lg bg-background p-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-muted">Chart link</span>
-              <button
-                type="button"
-                onClick={() => void handleCopy()}
-                className="rounded-lg bg-surface px-3 py-1 text-xs font-medium hover:bg-surface-hover"
-              >
-                {copied ? "Copied!" : "Copy"}
-              </button>
-            </div>
-            <textarea
-              readOnly
-              value={exported}
-              rows={3}
-              onFocus={(e) => e.currentTarget.select()}
-              className="w-full resize-y rounded-lg bg-surface p-2 text-left font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            />
+      {exported && (
+        <div className="flex flex-col gap-1.5 rounded-lg bg-surface p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs font-medium text-muted">Chart link</span>
+            <button
+              type="button"
+              onClick={() => void handleCopy()}
+              className="rounded-lg bg-background px-3 py-1 text-xs font-medium hover:bg-surface-hover"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
           </div>
-        )}
-
-        <div className="flex flex-wrap justify-end gap-2 border-t border-background pt-4">
-          <button
-            type="button"
-            onClick={handleExport}
-            className="rounded-lg bg-background px-4 py-2 text-sm font-medium hover:bg-surface-hover"
-          >
-            Export as chart link
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={saving}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-40"
-          >
-            {saving ? "Saving…" : "Save to library"}
-          </button>
+          <textarea
+            readOnly
+            value={exported}
+            rows={3}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full resize-y rounded-lg bg-background p-2 text-left font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
         </div>
+      )}
+
+      <div className="flex flex-wrap justify-end gap-2 border-t border-surface pt-4">
+        <button
+          type="button"
+          onClick={handleExport}
+          className="rounded-lg bg-surface px-4 py-2 text-sm font-medium hover:bg-surface-hover"
+        >
+          Export as chart link
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saving}
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-40"
+        >
+          {saving ? "Saving…" : "Save to library"}
+        </button>
       </div>
     </div>
   );
 }
 
-/** One bar, styled and sized exactly like `ChordChart.tsx`'s own `BarCell` (the same `COL_WIDTH`/
-    `BAR_HEIGHT`/barline treatment), so the grid this builds reads as "the chart," not a form. Not
-    active: shows its chords rendered through the real `ChordLabel`/`FitChordRow` — the same
-    components the actual chart uses — or a faint dot if it's still blank. Active: a plain-text
-    `<input>` showing the raw shorthand, so what's actually being typed is visible while you type
-    it (auto-converting it live into the pretty symbols mid-keystroke would fight the cursor). */
-function BarCellEditor({
-  index,
-  text,
-  isActive,
-  isFirst,
-  isLast,
-  canRemove,
-  timeSignature,
-  onActivate,
-  onChange,
-  onRemove,
-  onKeyDown,
-  inputRef,
+/** Sits in the grid column right after the last bar of the last row — only rendered when that row
+    has room left in it (`ChordChartEditor`'s own `addButtonFitsInGrid`); a full last row instead
+    gets a plain "Add bar" button below the whole grid. */
+function AddBarButton({ column, onClick }: { column: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Add bar"
+      title="Add bar"
+      className="flex items-center justify-center text-muted hover:text-foreground"
+      style={{ gridColumn: column, height: BAR_HEIGHT, width: COL_WIDTH }}
+    >
+      <PlusIcon className="h-5 w-5" />
+    </button>
+  );
+}
+
+/** One toggle in the active bar's options row. With a `glyph` (Start/End repeat, Coda, the "%"
+    mark), it's styled to match `ChordSymbolKeypad`'s own keys exactly, per a direct follow-up
+    naming that specifically — same stacked glyph-over-caption shape, not the single-line pill an
+    earlier round used for these four (which itself was a fix for an even earlier mismatch: giving
+    *only* these four the keypad's taller shape while "Add/Remove section" stayed a single-line
+    pill read as visually inconsistent — now resolved the other way, toward the keypad's look
+    specifically, per this explicit request rather than toward uniformity for its own sake).
+    Without a `glyph` ("Add/Remove section," which has no symbol of its own to preview), it stays
+    the plain single-line pill, since "styled like the keypad" was never asked of that one. */
+function BarToggle({
+  label,
+  active,
+  onClick,
+  glyph,
 }: {
-  index: number;
-  text: string;
-  isActive: boolean;
-  isFirst: boolean;
-  isLast: boolean;
-  canRemove: boolean;
-  timeSignature?: { top: number; bottom: number };
-  onActivate: () => void;
-  onChange: (text: string) => void;
-  onRemove: () => void;
-  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-  inputRef: (el: HTMLInputElement | null) => void;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  /** A SMuFL codepoint (rendered through `chordSymbolFont`, same as the real chart's own symbols —
+      Coda and the "%" mark both pass one of these) or a fully custom node (Start/End repeat's own
+      `RepeatGlyph`, a hand-built CSS icon rather than a font glyph — see that component's own
+      comment for why). Either way, switches the button to the stacked glyph-over-caption shape
+      `ChordSymbolKeypad`'s own keys use. */
+  glyph?: string | React.ReactNode;
 }) {
-  const leftBorder = isFirst ? "border-l-4 border-foreground" : "border-l border-muted/40";
-  const rightBorder = isLast ? "border-r-4 border-foreground" : "border-r border-muted/40";
-  const slots = parseBarSlots(text);
+  if (glyph) {
+    // Styled to match `ChordSymbolKeypad`'s own keys exactly — same layout, padding, and caption
+    // sizing. One deliberate deviation: the keypad's keys are plain one-shot "insert" actions with
+    // no state of their own, so their caption is always `text-muted`; these four are actual on/off
+    // toggles, and `text-muted`'s own grey reads poorly against the accent-colored background an
+    // active toggle gets (checked the real color values, not guessed) — so the caption only stays
+    // `text-muted` while off, and inherits the button's own `text-accent-foreground` once on
+    // instead.
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        title={label}
+        className={`flex flex-col items-center gap-0.5 rounded-lg px-2 py-1.5 transition-colors ${
+          active ? "bg-accent text-accent-foreground" : "bg-background hover:bg-surface-hover"
+        }`}
+      >
+        <span className="flex h-4 items-center justify-center">
+          {typeof glyph === "string" ? (
+            <span className={`text-base font-semibold leading-none ${chordSymbolFont.className}`}>{glyph}</span>
+          ) : (
+            glyph
+          )}
+        </span>
+        <span className={`text-[0.6rem] leading-none ${active ? "" : "text-muted"}`}>{label}</span>
+      </button>
+    );
+  }
 
   return (
-    <div
-      className={`group relative flex shrink-0 items-center justify-center gap-1 px-0.5 ${leftBorder} ${rightBorder}`}
-      style={{ width: COL_WIDTH, height: BAR_HEIGHT }}
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={label}
+      className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+        active
+          ? "bg-accent text-accent-foreground"
+          : "bg-background text-muted hover:bg-surface-hover hover:text-foreground"
+      }`}
     >
-      <span className="pointer-events-none absolute left-1 top-1 text-[0.6rem] tabular-nums text-muted/50">
-        {index + 1}
-      </span>
-      {canRemove && (
-        <button
-          type="button"
-          aria-label={`Remove bar ${index + 1}`}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-muted opacity-0 hover:bg-surface-hover hover:text-danger group-hover:opacity-100"
-        >
-          <TrashIcon className="h-3 w-3" />
-        </button>
-      )}
-      {timeSignature && <TimeSignatureGlyph timeSignature={timeSignature} />}
-      {isActive ? (
-        <input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="C^7"
-          className={`w-full min-w-0 bg-transparent text-center outline-none ${chordFont.className}`}
-          style={{ fontSize: QUALITY_SIZE }}
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={onActivate}
-          className="flex h-full w-full min-w-0 items-center justify-center"
-        >
-          {slots.length > 0 ? (
-            <FitChordRow>
-              {slots.map((slot, i) => (
-                <ChordLabel key={i} slot={slot} />
-              ))}
-            </FitChordRow>
-          ) : (
-            <span className="text-muted/40">·</span>
-          )}
-        </button>
-      )}
-    </div>
+      {label}
+    </button>
   );
 }
