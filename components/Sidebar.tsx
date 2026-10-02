@@ -265,7 +265,7 @@ function NavItems({
   }
 
   return (
-    <nav className="flex min-h-0 overflow-y-auto flex-col gap-3">
+    <nav className="flex overflow-y-auto h-full flex-col gap-3">
       {groups.length === 0 && (
         <p className={`px-3 text-muted ${large ? "text-base" : "text-sm"}`}>No tools found</p>
       )}
