@@ -36,14 +36,6 @@ export default function Home() {
               Welcome back, {greetingName}
             </p>
           )}
-          <h1 className="text-6xl font-bold leading-[0.95] tracking-tight text-accent sm:text-7xl">
-            sheddex
-          </h1>
-          <p className="max-w-md text-lg text-muted">
-            Metronome, tuner, ear trainers, chart reader, multitrack recorder.
-            Everything I use between sets, in one place. Free, nothing to
-            install.
-          </p>
 
           <div aria-hidden className="flex h-12 items-end gap-[3px]">
             {WAVEFORM.map((h, i) => (
@@ -55,13 +47,21 @@ export default function Home() {
             ))}
           </div>
 
+          <h1 className="text-6xl font-bold leading-[0.95] tracking-tight text-accent sm:text-7xl">
+            sheddex
+          </h1>
+
+          <p className="max-w-md text-lg text-muted">
+            Level up your playing with advanced, customizable practice tools.
+          </p>
+
           <p className="text-sm text-muted">
             <span className="hidden lg:inline">
               Press{" "}
               <kbd className="rounded bg-surface px-2 py-1 font-sans text-xs font-medium text-foreground">
                 /
               </kbd>{" "}
-              any time to jump straight to a tool.
+              to search all tools and pages.
             </span>
             <span className="lg:hidden">
               Open the menu any time to jump straight to a tool.
@@ -71,11 +71,7 @@ export default function Home() {
 
         <section className="border-l-2 border-accent/30 pl-5">
           <p className="text-lg leading-relaxed text-foreground/90">
-            I&apos;m Jack. I play music and write software. I got tired of
-            opening five different apps just to practice: one for the metronome,
-            one for the tuner, one for recording, and a notes app for tune
-            lists. So I built sheddex. It&apos;s everything I need for a
-            practice session, in one place, working the way I want it to.
+            Sheddex is built to be a free all-in-one solution to practice tools. My goal is to keep Sheddex distraction free; there will never be ads, popups, or paywalls. That being said, servers are not free, so if you&apos;re feeling generous please consider donating!
           </p>
           <a
             href="https://buymeacoffee.com/jackmechem"
@@ -97,21 +93,20 @@ export default function Home() {
 
         <section>
           <p className="text-sm text-muted">
-            No account needed. Everything here works right now, in this browser.
-            Sign in from the sidebar if you want your tune lists and settings to
+            Make an account if you want your tune lists and settings to
             follow you to another device, or want a public profile other
-            musicians can find on{" "}
-            <Link href="/community" className="text-accent hover:underline">
+            musicians can find on the{" "}
+            <Link href="/community" className="text-accent hover:underline font-bold">
               Community
             </Link>
-            . Totally optional either way.
+            . Your data will never be sold and never leaves our servers.
           </p>
         </section>
       </main>
 
-      <footer className="flex flex-col items-center gap-2 pb-6 text-center text-sm text-muted">
-        <p>
-          Built with <span className="text-accent">♥</span> for musicians, by
+      <footer className="flex flex-col items-center gap-2 pb-6 px-2 text-center text-md text-muted">
+        <p className="text-accent">
+          Built with <span className="text-accent text-lg">♥</span> for musicians, by
           musicians.
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">

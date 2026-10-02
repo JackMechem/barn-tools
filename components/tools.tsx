@@ -447,11 +447,11 @@ export function UsersIcon({ className }: { className?: string }) {
 
 /** Groups tools in the sidebar and search; also fixes their display order. */
 export const CATEGORIES = [
-  "Practice",
-  "Ear Training",
-  "Timing & Tuning",
-  "Audio",
   "Community",
+  "Timing & Tuning",
+  "Ear Training",
+  "Practice",
+  "Audio",
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 

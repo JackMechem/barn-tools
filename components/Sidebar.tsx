@@ -265,7 +265,7 @@ function NavItems({
   }
 
   return (
-    <nav className="flex flex-col gap-3">
+    <nav className="flex min-h-0 overflow-y-auto flex-col gap-3">
       {groups.length === 0 && (
         <p className={`px-3 text-muted ${large ? "text-base" : "text-sm"}`}>No tools found</p>
       )}
@@ -420,7 +420,7 @@ export default function Sidebar() {
           <div className="min-h-0 flex-1 overflow-y-auto pb-2">
             <NavItems large query={query} onNavigate={() => setMobileOpen(false)} />
           </div>
-          <div className="mt-auto flex flex-col gap-1 border-t border-surface-hover pt-2">
+          <div className="mt-1 flex flex-col gap-1 p-1 bg-background/50 rounded-xl">
             <PracticeTimerWidget />
             <AccountMenu large onNavigate={() => setMobileOpen(false)} />
             <ThemeButton large onClick={() => setThemeOpen(true)} />
@@ -472,7 +472,7 @@ export default function Sidebar() {
           <SearchBox query={query} onChange={setQuery} />
         )}
         <NavItems collapsed={collapsed} query={query} />
-        <div className="mt-auto flex flex-col gap-1 border-t border-surface-hover pt-2">
+        <div className="mt-1 flex flex-col gap-1 p-1 bg-background/50 rounded-lg">
           <PracticeTimerWidget collapsed={collapsed} />
           <AccountMenu collapsed={collapsed} />
           <ThemeButton collapsed={collapsed} onClick={() => setThemeOpen(true)} />
