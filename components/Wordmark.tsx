@@ -14,15 +14,17 @@ const WAVEFORM_SM = [30, 60, 20, 85, 45, 100, 35, 70, 50, 90, 25, 65, 40, 78, 32
 
 /** The "sheddex" wordmark with the waveform bars running behind it (peeking out above, below, and
     through the gaps in the letterforms) — shared by the home page hero, the desktop sidebar
-    header, and the mobile menu header, so there's exactly one place this effect is drawn rather
-    than three slightly-drifting copies. The caller's own `className` sets the outer box, whose
-    *height* is what the absolutely-positioned bars actually fill (and whose width, if wider than
-    the text, needs `justify-center` added via that same `className` to center the text within
-    it — off by default, since the sidebar/mobile usages want the text left-aligned instead).
-    `textClassName` sets "sheddex" itself's size, since every context uses a different one. */
+    header, the mobile menu header, and (with `animate` on) the app-wide loading screen
+    (`app/loading.tsx`), so there's exactly one place this effect is drawn rather than four
+    slightly-drifting copies. The caller's own `className` sets the outer box, whose *height* is
+    what the absolutely-positioned bars actually fill (and whose width, if wider than the text,
+    needs `justify-center` added via that same `className` to center the text within it — off by
+    default, since the sidebar/mobile usages want the text left-aligned instead). `textClassName`
+    sets "sheddex" itself's size, since every context uses a different one. */
 export default function Wordmark({
   size = "sm",
   heading = false,
+  animate = false,
   className = "",
   textClassName = "text-lg",
 }: {
@@ -32,6 +34,14 @@ export default function Wordmark({
   /** Renders "sheddex" as an `<h1>` instead of a plain `<span>` — for the one place (the home
       page hero) this text is also the page's actual main heading. */
   heading?: boolean;
+  /** Sets each bar oscillating in height via `--animate-wordmark-wave` (`app/globals.css`) instead
+      of sitting still at its hand-picked height — for the one place (the loading screen) this
+      wordmark is the whole point of what's on screen rather than a static piece of chrome, so it
+      needs to visibly read as "working" rather than as a frozen logo. Staggered per bar via a
+      deterministic (not `Math.random()`'d — same hydration-mismatch reasoning as the bar arrays
+      themselves) `animation-delay`/`animation-duration` derived from each bar's own index, so the
+      wave reads as organic motion rather than every bar blinking in lockstep. */
+  animate?: boolean;
   className?: string;
   textClassName?: string;
 }) {
@@ -46,8 +56,14 @@ export default function Wordmark({
         {bars.map((h, i) => (
           <span
             key={i}
-            className={`${size === "lg" ? "w-1" : "w-0.5"} flex-1 rounded-full bg-accent/20`}
-            style={{ height: `${h}%` }}
+            className={`${size === "lg" ? "w-1" : "w-0.5"} flex-1 rounded-full bg-accent/20 ${animate ? "animate-wordmark-wave" : ""}`}
+            style={{
+              height: `${h}%`,
+              ...(animate && {
+                animationDelay: `${(i % 7) * 0.09}s`,
+                animationDuration: `${0.9 + (i % 5) * 0.15}s`,
+              }),
+            }}
           />
         ))}
       </span>

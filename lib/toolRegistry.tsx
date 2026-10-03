@@ -2,13 +2,21 @@
 
 import dynamic from "next/dynamic";
 import type { ComponentType } from "react";
-import LoadingSpinner from "@/components/LoadingSpinner";
+import Wordmark from "@/components/Wordmark";
 import { NAV_LINKS } from "@/components/tools";
 
+/** Same animated wordmark `app/loading.tsx` shows for a normal page navigation — kept narrower
+    (`max-w-full` so it never forces a scrollbar in a genuinely narrow pane) since a tiling pane
+    can be much slimmer than a full page. */
 function PaneLoading() {
   return (
-    <div className="flex h-full items-center justify-center">
-      <LoadingSpinner size="lg" />
+    <div className="flex h-full items-center justify-center p-4">
+      <Wordmark
+        size="lg"
+        animate
+        className="h-12 w-48 max-w-full justify-center"
+        textClassName="text-xl sm:text-2xl"
+      />
     </div>
   );
 }
