@@ -17,6 +17,7 @@ import {
   svgProps,
 } from "@/components/tools";
 import { useFavorites } from "@/lib/useFavorites";
+import { updateTilingState, useTilingState } from "@/lib/useTilingLayout";
 
 const STORAGE_KEY = "jam-practice-sidebar";
 const DEFAULT_WIDTH = 220;
@@ -55,6 +56,23 @@ function CloseIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>
       <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+
+function TilingIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M12 3v18M3 12h9" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M4 10.5l4 4 8-9" />
     </svg>
   );
 }
@@ -327,6 +345,40 @@ function ThemeButton({
   );
 }
 
+/** Toggles "Advanced layouts" (`components/TilingLayout.tsx`) straight on/off — off by default so
+    the feature stays invisible until someone deliberately turns it on, per an explicit request
+    ("I want this feature disabled by default so it's not confusing"). A plain toggle button, not
+    a switch row with a separate label — same shape as `ThemeButton` right above, just with a
+    checkmark standing in for "on" when expanded (there's no room for a second control next to the
+    icon+label when collapsed, so `title` alone carries the state there, same as every other
+    collapsed-sidebar button). */
+function AdvancedLayoutsButton({
+  collapsed,
+  large,
+}: {
+  collapsed?: boolean;
+  large?: boolean;
+}) {
+  const { enabled } = useTilingState();
+  return (
+    <button
+      type="button"
+      onClick={() => updateTilingState({ enabled: !enabled })}
+      title={collapsed ? `Advanced layouts${enabled ? " (on)" : ""}` : undefined}
+      aria-pressed={enabled}
+      className={`flex w-full items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} px-3 font-medium transition-colors hover:bg-surface-hover ${
+        enabled ? "text-accent" : "text-muted hover:text-foreground"
+      } ${large ? "py-3 text-base" : "py-2 text-sm"} ${collapsed ? "justify-center" : ""}`}
+    >
+      <TilingIcon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
+      {!collapsed && <span className="flex-1 text-left">Advanced layouts (Beta)</span>}
+      {!collapsed && enabled && (
+        <CheckIcon className={large ? "h-4 w-4 shrink-0" : "h-3.5 w-3.5 shrink-0"} />
+      )}
+    </button>
+  );
+}
+
 export default function Sidebar() {
   const { width, collapsed } = useSyncExternalStore(subscribeLayout, getLayout, getServerLayout);
   const [dragging, setDragging] = useState(false);
@@ -425,6 +477,7 @@ export default function Sidebar() {
             <PracticeTimerWidget />
             <AccountMenu large onNavigate={() => setMobileOpen(false)} />
             <ThemeButton large onClick={() => setThemeOpen(true)} />
+            <AdvancedLayoutsButton large />
           </div>
         </div>
       )}
@@ -475,6 +528,7 @@ export default function Sidebar() {
           <PracticeTimerWidget collapsed={collapsed} />
           <AccountMenu collapsed={collapsed} />
           <ThemeButton collapsed={collapsed} onClick={() => setThemeOpen(true)} />
+          <AdvancedLayoutsButton collapsed={collapsed} />
         </div>
 
         <div

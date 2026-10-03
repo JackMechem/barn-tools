@@ -3,6 +3,7 @@ import Script from "next/script";
 import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import { FONT_VARIABLE_CLASSES } from "@/app/fonts";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
+import AppShell from "@/components/AppShell";
 import CommandPalette from "@/components/CommandPalette";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
 import PracticeTimerAlert from "@/components/PracticeTimerAlert";
@@ -56,9 +57,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <PracticeTimerWidget mobile />
             <PracticeTimerAlert />
             <UsernamePrompt />
-            <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-xl lg:border lg:border-surface-hover">
-              {children}
-            </div>
+            <AppShell>{children}</AppShell>
           </ConvexClientProvider>
         </ConvexAuthNextjsServerProvider>
       </body>
