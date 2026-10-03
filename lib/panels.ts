@@ -57,3 +57,18 @@ export function useSidePanelHidden(): [boolean, (hidden: boolean) => void] {
   const [{ hidden }, update] = usePersistedSettings(SIDE_PANEL_KEY, SIDE_PANEL_DEFAULTS);
   return [hidden, (next) => update({ hidden: next })];
 }
+
+const NAV_CATEGORIES_KEY = "jam-practice-nav-categories";
+const NAV_CATEGORIES_DEFAULTS = { collapsed: {} as Record<string, boolean> };
+
+/** Which of the sidebar's own category sections (`components/Sidebar.tsx`'s `NavItems`) are
+    collapsed — a device-local display preference, same category as `useOptionsHidden` above, not
+    real tool data. Absence from the record means expanded, so a category added later (or by
+    someone on an older saved copy of this record) defaults open rather than needing a migration. */
+export function useCollapsedCategories(): [Record<string, boolean>, (category: string, collapsed: boolean) => void] {
+  const [{ collapsed }, update] = usePersistedSettings(NAV_CATEGORIES_KEY, NAV_CATEGORIES_DEFAULTS);
+  return [
+    collapsed,
+    (category, value) => update({ collapsed: { ...collapsed, [category]: value } }),
+  ];
+}

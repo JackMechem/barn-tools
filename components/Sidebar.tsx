@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import AccountMenu from "@/components/AccountMenu";
 import { OPEN_PALETTE_EVENT } from "@/components/CommandPalette";
+import Flyout, { FlyoutItem } from "@/components/Flyout";
 import PracticeTimerWidget from "@/components/PracticeTimerWidget";
 import ThemeModal from "@/components/ThemeModal";
 import Wordmark from "@/components/Wordmark";
@@ -16,6 +17,7 @@ import {
   groupByCategory,
   svgProps,
 } from "@/components/tools";
+import { useCollapsedCategories } from "@/lib/panels";
 import { collectLeaves, createLeaf } from "@/lib/tilingLayout";
 import { TILEABLE_LINKS, TOOL_COMPONENTS } from "@/lib/toolRegistry";
 import { useFavorites } from "@/lib/useFavorites";
@@ -47,6 +49,14 @@ function ChevronsIcon({ className, flip }: { className?: string; flip?: boolean 
   );
 }
 
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg {...svgProps(className)}>
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
 function MenuIcon({ className }: { className?: string }) {
   return (
     <svg {...svgProps(className)}>
@@ -72,10 +82,15 @@ function TilingIcon({ className }: { className?: string }) {
   );
 }
 
-function CheckIcon({ className }: { className?: string }) {
+/** The sidebar's own "more options" trigger — three vertical dots, filled rather than stroked
+    (every other icon in this file is an outlined `svgProps` icon, but a stroked dot at this size
+    reads as a faint ring rather than a solid dot). */
+function DotsIcon({ className }: { className?: string }) {
   return (
-    <svg {...svgProps(className)}>
-      <path d="M4 10.5l4 4 8-9" />
+    <svg {...svgProps(className)} fill="currentColor" stroke="none">
+      <circle cx="12" cy="5" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="12" cy="19" r="1.6" />
     </svg>
   );
 }
@@ -209,6 +224,7 @@ function NavItems({
 }) {
   const pathname = usePathname();
   const { favorites, toggleFavorite, isAuthenticated } = useFavorites();
+  const [collapsedCategories, setCategoryCollapsed] = useCollapsedCategories();
   // Which link counts as "active" — normally just the real URL, but while "Advanced layouts" is
   // genuinely in effect (on, and desktop-sized — the same condition `AppShell.tsx` gates
   // `TilingLayout` on), focusing a different pane no longer moves Next's own `usePathname()` (see
@@ -223,13 +239,18 @@ function NavItems({
       : undefined;
   const effectivePathname = activePaneHref ?? pathname;
   const filtered = filterLinks(query);
-  const groups = groupByCategory(filtered);
+  // Community isn't a collapsible category like the others — a direct request to pull it out as
+  // its own always-visible item right under the search box, since it's really just the one link,
+  // not a group of tools the way every other category is.
+  const communityItem = filtered.find((link) => link.category === "Community");
+  const groups = groupByCategory(filtered.filter((link) => link.category !== "Community"));
   // A subset of `filtered`, in NAV_LINKS' own order (stable regardless of favoriting order) —
   // shown as a section of its own above the normal categories, where each item also still stays
   // in its own category below (a quick-access shortcut, not a "moved out of" relocation).
   const favoriteItems = isAuthenticated
     ? filtered.filter((link) => favorites.includes(link.href))
     : [];
+  const searching = query.trim().length > 0;
 
   function renderLink({ href, label, icon: Icon, desktopOnly }: NavLink) {
     const active = effectivePathname === href;
@@ -309,8 +330,11 @@ function NavItems({
 
   return (
     <nav className="flex overflow-y-auto h-full flex-col gap-3">
-      {groups.length === 0 && (
+      {groups.length === 0 && !communityItem && (
         <p className={`px-3 text-muted ${large ? "text-base" : "text-sm"}`}>No tools found</p>
+      )}
+      {communityItem && (
+        <div className="flex flex-col gap-1">{renderLink(communityItem)}</div>
       )}
       {favoriteItems.length > 0 && (
         <div className="flex flex-col gap-1">
@@ -327,98 +351,65 @@ function NavItems({
           {favoriteItems.map(renderLink)}
         </div>
       )}
-      {groups.map(({ category, items }) => (
-        <div key={category} className="flex flex-col gap-1">
-          {!collapsed && (
-            <p
-              className={`px-3 pb-0.5 font-semibold text-muted/70 ${
-                large ? "text-xs" : "text-[0.65rem]"
-              }`}
-            >
-              {category}
-            </p>
-          )}
-          {items.map(renderLink)}
-        </div>
-      ))}
+      {groups.map(({ category, items }) => {
+        // Collapsing is a `!collapsed`-only (not icon-mode) concept, and a search in progress
+        // always forces every category open — a collapsed category hiding its own search matches
+        // would just look like the search was broken.
+        const isCollapsed = !collapsed && !searching && (collapsedCategories[category] ?? false);
+        return (
+          <div key={category} className="flex flex-col gap-1">
+            {!collapsed &&
+              (searching ? (
+                <p
+                  className={`px-3 pb-0.5 font-semibold text-muted/70 ${
+                    large ? "text-xs" : "text-[0.65rem]"
+                  }`}
+                >
+                  {category}
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCategoryCollapsed(category, !isCollapsed)}
+                  aria-expanded={!isCollapsed}
+                  className="flex w-full items-center justify-between rounded-lg px-3 pb-0.5 font-semibold text-muted/70 transition-colors hover:text-foreground"
+                >
+                  <span className={large ? "text-xs" : "text-[0.65rem]"}>{category}</span>
+                  <ChevronDownIcon
+                    className={`h-3 w-3 shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
+                  />
+                </button>
+              ))}
+            {!isCollapsed && items.map(renderLink)}
+          </div>
+        );
+      })}
     </nav>
   );
 }
 
-function ThemeButton({
-  collapsed,
-  large,
-  onClick,
-}: {
-  collapsed?: boolean;
-  large?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={collapsed ? "Theme" : undefined}
-      className={`flex w-full items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} px-3 font-medium text-muted transition-colors hover:bg-surface-hover hover:text-foreground ${
-        large ? "py-3 text-base" : "py-2 text-sm"
-      } ${collapsed ? "justify-center" : ""}`}
-    >
-      <PaletteIcon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
-      {!collapsed && <span>Theme</span>}
-    </button>
-  );
-}
-
-/** Toggles "Advanced layouts" (`components/TilingLayout.tsx`) straight on/off — off by default so
-    the feature stays invisible until someone deliberately turns it on, per an explicit request
-    ("I want this feature disabled by default so it's not confusing"). Desktop-only: this button
-    is only ever mounted in the desktop `<aside>` footer, never the mobile menu, per a direct
-    follow-up request to disable the whole feature on mobile outright — `AppShell.tsx` backs that
-    up independently (it never renders `TilingLayout` below the `lg` breakpoint regardless of what
-    this button last set), but there's no reason to even show the option somewhere it can't do
-    anything.
+/** Advanced-layouts toggle logic shared by the desktop and mobile options flyouts (mobile only
+    ever reaches this via a href that's never actually reachable there — `AppShell.tsx` disables
+    tiling outright below the `lg` breakpoint regardless — but the toggle itself is still harmless
+    to expose, consistent with this being "the one place Advanced layouts lives" rather than
+    special-casing mobile out of a shared helper for no real benefit).
 
     Turning it *on* also resets the pane tree to a single fresh pane right here, seeded from
     `usePathname()` — the page you're actually looking at this instant, not whatever was last
     saved. Fixes a real bug reported directly ("when I initially turned the feature on, the tool I
     was using stopped displaying and there was text saying 'unknown tool'"): `TilingLayout`'s own
     seeding effect only ever fires when there's *no* saved tree at all, so turning the feature back
-    on after having used (and left) it earlier silently resumed whatever stale tree was last saved
-    — showing the wrong tool, or "unknown tool" if that stale tree somehow no longer matched a real
-    page. Resetting explicitly, right at the moment of enabling, means every time you turn this on
-    you get exactly the page you're on, full stop — `TilingLayout`'s own fallback seeding effect
-    is now just a safety net for the rare case this somehow didn't run first. Falls back to the
-    first tileable tool (`TILEABLE_LINKS[0]`) if you happen to enable it from a page that isn't a
-    tool at all (e.g. the home page), since there's no sensible single tool to seed from there. */
-function AdvancedLayoutsButton({ collapsed }: { collapsed?: boolean }) {
-  const { enabled } = useTilingState();
-  const pathname = usePathname();
-
-  function toggle() {
-    if (enabled) {
-      updateTilingState({ enabled: false });
-      return;
-    }
-    const seedHref = TOOL_COMPONENTS[pathname] ? pathname : TILEABLE_LINKS[0].href;
-    const root = createLeaf(seedHref);
-    updateTilingState({ enabled: true, tree: root, activePaneId: root.id });
+    on after having used (and left) it earlier silently resumed whatever stale tree was last saved.
+    Falls back to the first tileable tool (`TILEABLE_LINKS[0]`) if you happen to enable it from a
+    page that isn't a tool at all (e.g. the home page). */
+function toggleAdvancedLayouts(enabled: boolean, pathname: string) {
+  if (enabled) {
+    updateTilingState({ enabled: false });
+    return;
   }
-
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      title={collapsed ? `Advanced layouts${enabled ? " (on)" : ""}` : undefined}
-      aria-pressed={enabled}
-      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-surface-hover ${
-        enabled ? "text-accent" : "text-muted hover:text-foreground"
-      } ${collapsed ? "justify-center" : ""}`}
-    >
-      <TilingIcon className="h-4 w-4 shrink-0" />
-      {!collapsed && <span className="flex-1 text-left">Advanced layouts</span>}
-      {!collapsed && enabled && <CheckIcon className="h-3.5 w-3.5 shrink-0" />}
-    </button>
-  );
+  const seedHref = TOOL_COMPONENTS[pathname] ? pathname : TILEABLE_LINKS[0].href;
+  const root = createLeaf(seedHref);
+  updateTilingState({ enabled: true, tree: root, activePaneId: root.id });
 }
 
 export default function Sidebar() {
@@ -427,6 +418,8 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [themeOpen, setThemeOpen] = useState(false);
+  const { enabled: tilingEnabled } = useTilingState();
+  const pathname = usePathname();
 
   const setWidth = (w: number) => updateLayout({ width: clamp(w) });
   const setCollapsed = (c: boolean) => updateLayout({ collapsed: c });
@@ -484,23 +477,37 @@ export default function Sidebar() {
 
       {mobileOpen && (
         <div className="fixed inset-0 z-40 flex flex-col bg-surface px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)] lg:hidden">
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-6 flex items-center justify-between gap-1">
             <Link
               href="/"
               onClick={() => setMobileOpen(false)}
               aria-label="sheddex home"
-              className="rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="min-w-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <Wordmark className="h-8" textClassName="text-xl" />
             </Link>
-            <button
-              type="button"
-              onClick={() => setMobileOpen(false)}
-              aria-label="Close menu"
-              className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-surface-hover"
-            >
-              <CloseIcon className="h-5 w-5" />
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              <Flyout icon={DotsIcon} label="Menu options" align="end">
+                {(close) => (
+                  <FlyoutItem
+                    icon={PaletteIcon}
+                    label="Theme"
+                    onSelect={() => {
+                      setThemeOpen(true);
+                      close();
+                    }}
+                  />
+                )}
+              </Flyout>
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                aria-label="Close menu"
+                className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-surface-hover"
+              >
+                <CloseIcon className="h-5 w-5" />
+              </button>
+            </div>
           </div>
           <SearchBox
             large
@@ -518,7 +525,6 @@ export default function Sidebar() {
           <div className="mt-1 flex flex-col gap-1 p-1 bg-background/50 rounded-xl">
             <PracticeTimerWidget />
             <AccountMenu large onNavigate={() => setMobileOpen(false)} />
-            <ThemeButton large onClick={() => setThemeOpen(true)} />
           </div>
         </div>
       )}
@@ -531,25 +537,57 @@ export default function Sidebar() {
           dragging ? "" : "transition-[width] duration-150"
         }`}
       >
-        <button
-          type="button"
-          onClick={() => setCollapsed(!collapsed)}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="absolute right-2 top-2 z-10 flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+        <div
+          className={
+            collapsed
+              ? "mb-4 flex h-10 items-center justify-center"
+              : "mb-4 flex h-10 items-center justify-between gap-1 pl-1"
+          }
         >
-          <ChevronsIcon className="h-4 w-4" flip={collapsed} />
-        </button>
-        <div className="mb-4 flex h-10 items-center overflow-hidden pl-1 pr-12">
           {!collapsed && (
             <Link
               href="/"
               aria-label="sheddex home"
-              className="min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="min-w-0 flex-1 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
-              <Wordmark className="h-8 w-full" textClassName="text-lg" />
+              <Wordmark className="h-8" textClassName="text-lg" />
             </Link>
           )}
+          <Flyout
+            icon={DotsIcon}
+            label="Sidebar options"
+            align={collapsed ? "start" : "end"}
+          >
+            {(close) => (
+              <>
+                <FlyoutItem
+                  icon={TilingIcon}
+                  label="Advanced layouts"
+                  checked={tilingEnabled}
+                  onSelect={() => {
+                    toggleAdvancedLayouts(tilingEnabled, pathname);
+                    close();
+                  }}
+                />
+                <FlyoutItem
+                  icon={PaletteIcon}
+                  label="Theme"
+                  onSelect={() => {
+                    setThemeOpen(true);
+                    close();
+                  }}
+                />
+                <FlyoutItem
+                  icon={ChevronsIcon}
+                  label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  onSelect={() => {
+                    setCollapsed(!collapsed);
+                    close();
+                  }}
+                />
+              </>
+            )}
+          </Flyout>
         </div>
         {collapsed ? (
           <button
@@ -568,8 +606,6 @@ export default function Sidebar() {
         <div className="mt-1 flex flex-col gap-1 p-1 bg-background/50 rounded-lg">
           <PracticeTimerWidget collapsed={collapsed} />
           <AccountMenu collapsed={collapsed} />
-          <ThemeButton collapsed={collapsed} onClick={() => setThemeOpen(true)} />
-          <AdvancedLayoutsButton collapsed={collapsed} />
         </div>
 
         <div
