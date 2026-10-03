@@ -4,6 +4,7 @@ import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import { FONT_VARIABLE_CLASSES } from "@/app/fonts";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import AppShell from "@/components/AppShell";
+import BackgroundToolDock from "@/components/BackgroundToolDock";
 import CommandPalette from "@/components/CommandPalette";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
 import PracticeTimerAlert from "@/components/PracticeTimerAlert";
@@ -57,6 +58,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <PracticeTimerWidget mobile />
             <PracticeTimerAlert />
             <UsernamePrompt />
+            <BackgroundToolDock />
             <AppShell>{children}</AppShell>
           </ConvexClientProvider>
         </ConvexAuthNextjsServerProvider>

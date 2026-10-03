@@ -126,6 +126,14 @@ function subscribeLayout(listener: () => void) {
   return () => layoutListeners.delete(listener);
 }
 
+/** The sidebar's current on-screen width in pixels (collapsed or not) — exported so
+    `BackgroundToolDock.tsx` can anchor itself just to the right of the sidebar's own edge without
+    duplicating this module's layout store. */
+export function useSidebarShownWidth(): number {
+  const { width, collapsed } = useSyncExternalStore(subscribeLayout, getLayout, getServerLayout);
+  return collapsed ? COLLAPSED_WIDTH : width;
+}
+
 function SearchBox({
   query,
   onChange,

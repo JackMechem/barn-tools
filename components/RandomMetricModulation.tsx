@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import BeatIndicator from "@/components/BeatIndicator";
 import PanelsToggle from "@/components/PanelsToggle";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
@@ -17,12 +17,7 @@ import {
 import { MeterIcon, ShuffleIcon, SpeakerIcon } from "@/components/tools";
 import ToolLayout from "@/components/ToolLayout";
 import KeyHint from "@/components/KeyHint";
-import {
-  BeatLevel,
-  ClickEngine,
-  DEFAULT_CLICK_SOUND_ID,
-  startClickEngine,
-} from "@/lib/clickEngine";
+import { BeatLevel, DEFAULT_CLICK_SOUND_ID } from "@/lib/clickEngine";
 import { MAX_BEATS } from "@/lib/meters";
 import {
   NEXT_LEVEL,
@@ -33,15 +28,22 @@ import {
   nearestNoteValue,
   useTapTempo,
 } from "@/lib/meterControls";
-import { MODULATIONS, Phase, planModulation } from "@/lib/metricModulation";
+import { MODULATIONS } from "@/lib/metricModulation";
+import {
+  clearMetricModLog,
+  getMetricModServerSnapshot,
+  getMetricModSnapshot,
+  startMetricMod,
+  stopMetricMod,
+  subscribeMetricMod,
+  updateMetricModLiveSettings,
+} from "@/lib/metricModulationEngine";
 import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 
 const DEFAULT_BPM = 100;
 const MIN_BARS_PER_MODULATION = 1;
 const MAX_BARS_PER_MODULATION = 32;
-
-type LogEntry = { id: number; from: number; to: number; label: string };
 
 /** The "3:2 polyrhythm" part of a "3:2 polyrhythm — quarter = dotted quarter" label. */
 function ratioPart(label: string) {
@@ -81,11 +83,6 @@ export default function RandomMetricModulation() {
     DEFAULT_SETTINGS,
   );
   const bpm = clampBpm(settings.bpm);
-  // The exact (unrounded) tempo used for scheduling and for chaining modulation math — `bpm`
-  // above is the rounded, persisted, displayed value. Keeping the real one at full precision
-  // stops rounding error from compounding across a run's worth of modulations and pulling the
-  // reference click out of sync with what the ratios actually predict.
-  const preciseBpmRef = useRef(bpm);
   const beatsPerBar = Math.min(
     MAX_BEATS,
     Math.max(1, Math.round(settings.beatsPerBar)),
@@ -115,13 +112,7 @@ export default function RandomMetricModulation() {
     MODULATIONS.some((m) => m.id === id),
   );
 
-  const setBpm = (value: number) => {
-    const clamped = clampBpm(value);
-    // A manual tempo change always resets to a clean integer, same as the persisted value.
-    preciseBpmRef.current = clamped;
-    setPreciseBpmDisplay(clamped);
-    updateSettings({ bpm: clamped });
-  };
+  const setBpm = (value: number) => updateSettings({ bpm: clampBpm(value) });
   const setBeatUnit = (beatUnit: number) => updateSettings({ beatUnit });
   const setSubdivision = (subdivision: number) =>
     updateSettings({ subdivision });
@@ -155,246 +146,56 @@ export default function RandomMetricModulation() {
         : [...enabledRatios, id],
     });
 
-  const [running, setRunning] = useState(false);
-  const [currentBeat, setCurrentBeat] = useState<number | null>(null);
-  const [currentSub, setCurrentSub] = useState(0);
-  const [referenceBeat, setReferenceBeat] = useState<number | null>(null);
-  const [referenceBpmDisplay, setReferenceBpmDisplay] = useState(bpm);
-  // Mirrors preciseBpmRef for the render-time read in TempoHero; the ref itself is only read
-  // from the click engine's callback, which runs outside render.
-  const [preciseBpmDisplay, setPreciseBpmDisplay] = useState(bpm);
-  const [barsIntoInterval, setBarsIntoInterval] = useState(0);
-  const [effectiveBars, setEffectiveBars] = useState(minBarsPerModulation);
-  const [lastModulation, setLastModulation] = useState<LogEntry | null>(null);
-  const [nextPreview, setNextPreview] = useState<{
-    toBpm: number;
-    label: string;
-    barsToRealign: number | null;
-    quarterEquivalent: string | null;
-  } | null>(null);
-  const [log, setLog] = useState<LogEntry[]>([]);
-
-  const engineRef = useRef<ClickEngine | null>(null);
-  const settingsRef = useRef({
-    bpm,
-    beatsPerBar,
-    accents,
-    subdivision,
-    subAccents,
-    volume,
-    soundId,
-  });
-  // A second click track that runs alongside the main one (off the same engine, see `start()`),
-  // keeping a reference pulse going the whole time (see `referenceBpmRef` below for what tempo
-  // it actually tracks), so you can hear it against whatever the main click has modulated to.
-  // Always locked to `subdivision: 1` (see the `setSubdivision`/`SUBDIVISIONS` options, which only
-  // ever apply to the main click), so it never has any subdivision dots/accents of its own.
-  const referenceSettingsRef = useRef({
-    bpm,
-    beatsPerBar,
-    accents,
-    subdivision: 1,
-    subAccents: [] as BeatLevel[],
-    volume: referenceMuted ? 0 : volume,
-    soundId: referenceSoundId,
-  });
-  // A new bar is detected inside `getSettings`, right as the engine schedules its first beat —
-  // these track where we are in the current modulation interval without their own scheduler.
-  const barsSinceModRef = useRef(0);
-  // How many bars the *current* interval lasts: the fixed setting, or (with "match to
-  // realignment" on) however many bars it takes the new tempo to land back on a downbeat with
-  // the reference tempo — never fewer than the minimum, even then.
-  const effectiveBarsRef = useRef(minBarsPerModulation);
-  const seenFirstBeatRef = useRef(false);
-  const lastRatioIdRef = useRef<string | null>(null);
-  // The tempo this run started at, so "return to original" has something to return to.
-  const originalBpmRef = useRef(bpm);
-  // What the reference click is currently ticking at: pinned to the original tempo when
-  // "return to original" is on, or the tempo just left behind (updated on every modulation)
-  // when it's off, so it's always one step behind the main click instead of stuck at the start.
-  const referenceBpmRef = useRef(bpm);
-  const phaseRef = useRef<Phase>("home");
-  // The modulation that's queued up to happen at the next bar boundary, precomputed one step
-  // ahead so it can be shown before it happens.
-  const upcomingRef = useRef<ReturnType<typeof planModulation> | null>(null);
-  const logIdRef = useRef(0);
+  // The actual engine — click scheduling, modulation planning, running state, and the log — lives
+  // in `lib/metricModulationEngine.ts`, a plain module independent of this component's own mount
+  // lifecycle (see that file's own doc comment, and `lib/metronomeEngine.ts`'s, for why). This
+  // component is just a view: push live-editable settings in, read the snapshot back out.
+  const engineState = useSyncExternalStore(
+    subscribeMetricMod,
+    getMetricModSnapshot,
+    getMetricModServerSnapshot,
+  );
+  const {
+    running,
+    currentBeat,
+    currentSub,
+    referenceBeat,
+    referenceBpmDisplay,
+    preciseBpmDisplay,
+    barsIntoInterval,
+    effectiveBars,
+    lastModulation,
+    nextPreview,
+    log,
+    playingReference,
+  } = engineState;
 
   useEffect(() => {
-    settingsRef.current = {
-      bpm: preciseBpmRef.current,
+    updateMetricModLiveSettings({
       beatsPerBar,
       accents,
       subdivision,
       subAccents,
       volume,
       soundId,
-    };
-  }, [bpm, beatsPerBar, accents, subdivision, subAccents, volume, soundId]);
+      referenceMuted,
+      referenceSoundId,
+    });
+  }, [beatsPerBar, accents, subdivision, subAccents, volume, soundId, referenceMuted, referenceSoundId]);
 
-  useEffect(() => {
-    // The reference click's tempo itself comes from `referenceBpmRef` (updated on modulation,
-    // not by React state); everything else about it can still change live, same as the main click.
-    referenceSettingsRef.current = {
-      bpm: referenceBpmRef.current,
-      beatsPerBar,
-      accents,
-      subdivision: 1,
-      subAccents: [],
-      volume: referenceMuted ? 0 : volume,
-      soundId: referenceSoundId,
-    };
-  }, [beatsPerBar, accents, volume, referenceMuted, referenceSoundId]);
-
-  useEffect(() => {
-    return () => engineRef.current?.stop();
-  }, []);
-
-  /** Precomputes the modulation for the bar after next, and mirrors it to state for display. */
-  function queueNext(fromBpm: number) {
-    const plan = planModulation(
-      fromBpm,
-      originalBpmRef.current,
+  function start() {
+    startMetricMod({
+      bpm,
       returnToOriginal,
-      phaseRef.current,
       enabledRatios,
-      avoidRepeat ? lastRatioIdRef.current : null,
-    );
-    upcomingRef.current = plan;
-    setNextPreview({
-      toBpm: plan.toBpm,
-      label: plan.label,
-      barsToRealign: plan.barsToRealign,
-      quarterEquivalent: plan.quarterEquivalent,
+      avoidRepeat,
+      matchToRealignment,
+      minBarsPerModulation,
+      playOriginalTempo,
     });
   }
 
-  /**
-   * Called by the click engine right as it schedules each beat — including, crucially, before it
-   * computes the gap to the *next* beat. Applying the modulation here (rather than reacting to
-   * `onBeat`, which only fires once a beat is actually heard) means the very first interval after
-   * the bar line already reflects the new tempo instead of lagging a beat behind.
-   */
-  function getSettings(beat: number, sub: number) {
-    if (beat === 0 && sub === 0) {
-      if (!seenFirstBeatRef.current) {
-        // The first beat of the run starts bar 1 — it doesn't complete one.
-        seenFirstBeatRef.current = true;
-      } else {
-        const barsElapsed = barsSinceModRef.current + 1;
-        if (barsElapsed < effectiveBarsRef.current) {
-          barsSinceModRef.current = barsElapsed;
-          setBarsIntoInterval(barsElapsed);
-        } else {
-          barsSinceModRef.current = 0;
-          setBarsIntoInterval(0);
-          const plan =
-            upcomingRef.current ??
-            planModulation(
-              settingsRef.current.bpm,
-              originalBpmRef.current,
-              returnToOriginal,
-              phaseRef.current,
-              enabledRatios,
-              avoidRepeat ? lastRatioIdRef.current : null,
-            );
-          const fromBpm = settingsRef.current.bpm;
-          // Keep the exact tempo for scheduling/chaining, and only round what gets displayed
-          // and persisted — rounding the real value here would compound over a run's worth of
-          // modulations and pull the reference click's predicted realignment out of true.
-          preciseBpmRef.current = plan.toBpm;
-          setPreciseBpmDisplay(plan.toBpm);
-          settingsRef.current = { ...settingsRef.current, bpm: plan.toBpm };
-          updateSettings({ bpm: Math.round(plan.toBpm) });
-          if (plan.modulationId) lastRatioIdRef.current = plan.modulationId;
-          phaseRef.current = plan.nextPhase;
-          const nextBars =
-            matchToRealignment && plan.barsToRealign !== null
-              ? Math.max(plan.barsToRealign, minBarsPerModulation)
-              : minBarsPerModulation;
-          effectiveBarsRef.current = nextBars;
-          setEffectiveBars(nextBars);
-          // Outside "return to original" mode, the reference click follows one step behind the
-          // main one — always the tempo just left, not the very first tempo of the run.
-          if (!returnToOriginal) {
-            referenceBpmRef.current = fromBpm;
-            referenceSettingsRef.current = {
-              ...referenceSettingsRef.current,
-              bpm: fromBpm,
-            };
-            setReferenceBpmDisplay(fromBpm);
-          }
-          logIdRef.current++;
-          const entry: LogEntry = {
-            id: logIdRef.current,
-            from: fromBpm,
-            to: plan.toBpm,
-            label: plan.label,
-          };
-          setLastModulation(entry);
-          setLog((prev) => [...prev, entry].slice(-50));
-          queueNext(plan.toBpm);
-        }
-      }
-    }
-    return settingsRef.current;
-  }
-
-  function start() {
-    engineRef.current?.stop();
-    barsSinceModRef.current = 0;
-    seenFirstBeatRef.current = false;
-    lastRatioIdRef.current = null;
-    preciseBpmRef.current = bpm;
-    setPreciseBpmDisplay(bpm);
-    originalBpmRef.current = bpm;
-    referenceBpmRef.current = bpm;
-    setReferenceBpmDisplay(bpm);
-    phaseRef.current = "home";
-    effectiveBarsRef.current = minBarsPerModulation;
-    setEffectiveBars(minBarsPerModulation);
-    setBarsIntoInterval(0);
-    setLastModulation(null);
-    setLog([]);
-    queueNext(bpm);
-    // Both tracks run off the same scheduler tick (see `startClickEngine`), so the reference
-    // click can only drift from the main one by its own intentional tempo difference — never
-    // from browser timer jitter nudging one track's schedule but not the other's.
-    const tracks = [
-      {
-        getSettings,
-        onBeat: (beat: number, sub: number) => {
-          setCurrentBeat(beat);
-          setCurrentSub(sub);
-        },
-      },
-    ];
-    if (playOriginalTempo) {
-      referenceSettingsRef.current = {
-        bpm,
-        beatsPerBar,
-        accents,
-        subdivision: 1,
-        subAccents: [],
-        volume: referenceMuted ? 0 : volume,
-        soundId: referenceSoundId,
-      };
-      tracks.push({
-        getSettings: () => referenceSettingsRef.current,
-        onBeat: setReferenceBeat,
-      });
-    }
-    engineRef.current = startClickEngine(tracks);
-    setRunning(true);
-  }
-
-  function stop() {
-    engineRef.current?.stop();
-    engineRef.current = null;
-    setRunning(false);
-    setCurrentBeat(null);
-    setCurrentSub(0);
-    setReferenceBeat(null);
-  }
+  const stop = stopMetricMod;
 
   useSpaceToggle(running ? stop : start);
   const tap = useTapTempo(setBpm);
@@ -450,7 +251,7 @@ export default function RandomMetricModulation() {
             </div>
             <button
               type="button"
-              onClick={() => setLog([])}
+              onClick={clearMetricModLog}
               className="self-start text-sm font-medium text-muted hover:text-danger"
             >
               Clear log
@@ -619,14 +420,14 @@ export default function RandomMetricModulation() {
       }
     >
       <div className="flex w-full flex-col items-center gap-4">
-        {running && playOriginalTempo && (
+        {running && playingReference && (
           <div className="flex flex-col items-center gap-2 opacity-80">
             <div className="flex flex-col items-center">
               <span className="text-4xl font-bold tabular-nums">
                 {Math.round(referenceBpmDisplay)}
               </span>
               <span className="text-xs font-medium text-muted">
-                {returnToOriginal ? "Original" : "Previous"} · {beatsPerBar}/
+                {engineState.returnToOriginal ? "Original" : "Previous"} · {beatsPerBar}/
                 {beatUnit}
               </span>
             </div>

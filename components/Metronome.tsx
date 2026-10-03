@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import BeatIndicator from "@/components/BeatIndicator";
 import PanelsToggle from "@/components/PanelsToggle";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
@@ -16,13 +16,7 @@ import SwitchRow from "@/components/SwitchRow";
 import { MeterIcon, SpeakerIcon } from "@/components/tools";
 import ToolLayout from "@/components/ToolLayout";
 import KeyHint from "@/components/KeyHint";
-import {
-  BeatLevel,
-  ClickEngine,
-  ClickSettings,
-  DEFAULT_CLICK_SOUND_ID,
-  startClickEngine,
-} from "@/lib/clickEngine";
+import { BeatLevel, DEFAULT_CLICK_SOUND_ID } from "@/lib/clickEngine";
 import { MAX_BEATS } from "@/lib/meters";
 import {
   NEXT_LEVEL,
@@ -43,6 +37,15 @@ import {
   cycleSectionSubAccent,
   sectionAt,
 } from "@/lib/structure";
+import {
+  getMetronomeServerSnapshot,
+  getMetronomeSnapshot,
+  startMetronome,
+  stopMetronome,
+  subscribeMetronome,
+  updateMetronomeSettings,
+  updateMetronomeStructure,
+} from "@/lib/metronomeEngine";
 import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
 
@@ -119,45 +122,19 @@ export default function Metronome() {
   const setUseStructure = (useStructure: boolean) => updateSettings({ useStructure });
   const setStructure = (structure: Structure) => updateSettings({ structure });
   const setTempoNoteValue = (tempoNoteValue: number | null) => updateSettings({ tempoNoteValue });
-  const [running, setRunning] = useState(false);
-  const [currentBeat, setCurrentBeat] = useState<number | null>(null);
-  const [currentSub, setCurrentSub] = useState(0);
-  // Which form entry (and how far into its bars) the structure is currently on — kept separate
-  // from `currentBeat`/`currentSub` since those reset to a neutral state on every stop, but a
-  // structure's position should also be *editable* (which section's accents you're looking at)
-  // while stopped, defaulting to the first form entry (`?? 0` wherever this is read).
-  const [structPlayback, setStructPlayback] = useState<{
-    formIndex: number;
-    barInSection: number;
-  } | null>(null);
-
-  const engineRef = useRef<ClickEngine | null>(null);
-  // Note: `bpm` here is the *raw, displayed* tempo — whatever note value it actually refers to
-  // (the meter's own beat unit, or `tempoNoteValue`'s override) is only resolved down to an actual
-  // engine click rate inside `getSettings`, using whichever beat unit is active at that moment
-  // (this `beatUnit`, or — in structure mode — the current section's own, which can differ bar to
-  // bar). That resolution can't happen here: this ref's `beatUnit` is always the plain meter's.
-  const settingsRef = useRef({
-    bpm,
-    beatsPerBar,
-    beatUnit,
-    accents,
-    subdivision,
-    subAccents,
-    volume,
-    soundId,
-    tempoNoteValue,
-  });
-  // Mutable mirror of the structure-mode settings, read from inside `getSettings` below (which
-  // runs off the click engine's own scheduler tick, not a render) — same reason `settingsRef`
-  // exists instead of closing over the plain state values directly.
-  const structureRef = useRef({ useStructure, structure });
-  const structFormIndexRef = useRef(0);
-  const structBarsIntoRef = useRef(0);
-  const structSeenFirstRef = useRef(false);
+  // The actual engine — click scheduling, running state, current beat/sub, and structure
+  // advancement — lives in `lib/metronomeEngine.ts`, a plain module independent of this
+  // component's own mount lifecycle (see that file's own doc comment for why). This component is
+  // just a view over it: push settings in whenever they change, read the live snapshot back out.
+  const engineState = useSyncExternalStore(
+    subscribeMetronome,
+    getMetronomeSnapshot,
+    getMetronomeServerSnapshot,
+  );
+  const { running, currentBeat, currentSub } = engineState;
 
   useEffect(() => {
-    settingsRef.current = {
+    updateMetronomeSettings({
       bpm,
       beatsPerBar,
       beatUnit,
@@ -167,120 +144,21 @@ export default function Metronome() {
       volume,
       soundId,
       tempoNoteValue,
-    };
+    });
   }, [bpm, beatsPerBar, beatUnit, accents, subdivision, subAccents, volume, soundId, tempoNoteValue]);
 
   useEffect(() => {
-    structureRef.current = { useStructure, structure };
+    updateMetronomeStructure({ useStructure, structure });
   }, [useStructure, structure]);
-
-  useEffect(() => {
-    return () => engineRef.current?.stop();
-  }, []);
-
-  /**
-   * Called by the click engine right as it schedules each tick. Off (or with an empty form), this
-   * is just `settingsRef.current`'s plain single meter, converted from the displayed tempo to an
-   * actual click rate via `tempoNoteValue` (see that field's own comment above). With a structure
-   * running, `beat === 0 && sub === 0` (the instant a new bar starts) is when it decides whether
-   * the *current* form entry has finished its bar count and, if so, advances to the next one
-   * (looping back to the start past the end) — the same "detect a bar boundary inside
-   * getSettings, before it computes the gap to the next beat" trick
-   * `RandomMetricModulation.tsx` uses to land a tempo change exactly on the bar line, just
-   * switching the whole meter instead of the tempo.
-   */
-  function getSettings(beat: number, sub: number): ClickSettings {
-    const base = settingsRef.current;
-    const { useStructure: active, structure: struct } = structureRef.current;
-
-    if (!active || struct.form.length === 0) {
-      return {
-        bpm: base.tempoNoteValue ? convertTempo(base.bpm, base.tempoNoteValue, base.beatUnit) : base.bpm,
-        beatsPerBar: base.beatsPerBar,
-        accents: base.accents,
-        subdivision: base.subdivision,
-        subAccents: base.subAccents,
-        volume: base.volume,
-        soundId: base.soundId,
-      };
-    }
-
-    if (beat === 0 && sub === 0) {
-      if (!structSeenFirstRef.current) {
-        // The first beat of the run starts form entry 1 — it doesn't complete one.
-        structSeenFirstRef.current = true;
-      } else {
-        const current = sectionAt(struct, structFormIndexRef.current);
-        const barsInSection = current?.bars ?? 1;
-        const barsElapsed = structBarsIntoRef.current + 1;
-        if (barsElapsed < barsInSection) {
-          structBarsIntoRef.current = barsElapsed;
-        } else {
-          structBarsIntoRef.current = 0;
-          structFormIndexRef.current = (structFormIndexRef.current + 1) % struct.form.length;
-        }
-        setStructPlayback({
-          formIndex: structFormIndexRef.current,
-          barInSection: structBarsIntoRef.current,
-        });
-      }
-    }
-
-    const section = sectionAt(struct, structFormIndexRef.current);
-    if (!section) {
-      return {
-        bpm: base.tempoNoteValue ? convertTempo(base.bpm, base.tempoNoteValue, base.beatUnit) : base.bpm,
-        beatsPerBar: base.beatsPerBar,
-        accents: base.accents,
-        subdivision: base.subdivision,
-        subAccents: base.subAccents,
-        volume: base.volume,
-        soundId: base.soundId,
-      };
-    }
-    return {
-      // Converted using *this section's own* beat unit, not the plain meter's — a structure can
-      // (and usually does) move through several different beat units, so "quarter note = 275"
-      // yields a different actual click rate in each one.
-      bpm: base.tempoNoteValue ? convertTempo(base.bpm, base.tempoNoteValue, section.beatUnit) : base.bpm,
-      beatsPerBar: section.beatsPerBar,
-      accents: defaultAccents(section.beatsPerBar, section.accents),
-      subdivision: section.subdivision,
-      subAccents: defaultSubAccents(section.beatsPerBar, section.subdivision, section.subAccents),
-      volume: base.volume,
-      soundId: base.soundId,
-    };
-  }
 
   const canStart = !useStructure || structure.form.length > 0;
 
   function start() {
     if (!canStart) return;
-    engineRef.current?.stop();
-    structFormIndexRef.current = 0;
-    structBarsIntoRef.current = 0;
-    structSeenFirstRef.current = false;
-    setStructPlayback({ formIndex: 0, barInSection: 0 });
-    engineRef.current = startClickEngine([
-      {
-        getSettings,
-        onBeat: (beat, sub) => {
-          setCurrentBeat(beat);
-          setCurrentSub(sub);
-        },
-      },
-    ]);
-    setRunning(true);
+    startMetronome();
   }
 
-  function stop() {
-    engineRef.current?.stop();
-    engineRef.current = null;
-    setRunning(false);
-    setCurrentBeat(null);
-    setCurrentSub(0);
-    setStructPlayback(null);
-  }
+  const stop = stopMetronome;
 
   useSpaceToggle(running ? stop : start);
   const tap = useTapTempo(setBpm);
@@ -313,7 +191,7 @@ export default function Metronome() {
   // has ever been pressed.
   const activeSection =
     useStructure && structure.form.length > 0
-      ? sectionAt(structure, structPlayback?.formIndex ?? 0)
+      ? sectionAt(structure, engineState.formIndex)
       : null;
   const displayAccents = activeSection
     ? defaultAccents(activeSection.beatsPerBar, activeSection.accents)
@@ -365,7 +243,7 @@ export default function Metronome() {
                 structure={structure}
                 onChange={setStructure}
                 running={running}
-                activeFormIndex={structPlayback?.formIndex ?? null}
+                activeFormIndex={running ? engineState.formIndex : null}
                 playingBeat={currentBeat}
                 playingSub={currentSub}
               />
@@ -431,7 +309,7 @@ export default function Metronome() {
         {useStructure && activeSection && (
           <p className="text-sm font-medium text-muted">
             Section <span className="text-foreground">{activeSection.name}</span> · bar{" "}
-            {(structPlayback?.barInSection ?? 0) + 1} of {activeSection.bars}
+            {engineState.barInSection + 1} of {activeSection.bars}
           </p>
         )}
         {useStructure && !activeSection ? (

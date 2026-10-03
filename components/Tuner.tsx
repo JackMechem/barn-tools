@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import CollapsiblePanel from "@/components/CollapsiblePanel";
 import Hint from "@/components/Hint";
 import ToolLayout from "@/components/ToolLayout";
@@ -10,15 +10,18 @@ import PanelsToggle from "@/components/PanelsToggle";
 import Select from "@/components/Select";
 import TunerDial from "@/components/TunerDial";
 import { MicIcon, SlidersIcon, TunerIcon } from "@/components/tools";
-import {
-  AudioInput,
-  InputDevice,
-  SENSITIVITY,
-  listAudioInputs,
-  startAudioInput,
-} from "@/lib/audioInput";
+import { InputDevice, SENSITIVITY, listAudioInputs } from "@/lib/audioInput";
 import { midiToNote, parseNote } from "@/lib/noteRange";
 import { startTone, ToneHandle } from "@/lib/toneGenerator";
+import {
+  getTunerServerSnapshot,
+  getTunerSnapshot,
+  setTunerToneActive,
+  startTunerListening,
+  stopTunerListening,
+  subscribeTuner,
+  updateTunerConfig,
+} from "@/lib/tunerEngine";
 import { TUNER_INSTRUMENTS, getInstrument, getTuning } from "@/lib/tunings";
 import { useSyncedSettings } from "@/lib/useSyncedSettings";
 import { useSpaceToggle } from "@/lib/useSpaceToggle";
@@ -40,7 +43,6 @@ const MIN_REF = 415;
 const MAX_REF = 466;
 const MIN_OCTAVE = 0;
 const MAX_OCTAVE = 7;
-const HOLD_MS = 800;
 const TONE_SECONDS = 2.5;
 
 const WAVEFORMS: { value: OscillatorType; label: string }[] = [
@@ -59,7 +61,6 @@ function centsColor(cents: number) {
   return abs <= 8 ? IN_TUNE : abs <= 25 ? CLOSE : OFF;
 }
 
-type Reading = { target: number; cents: number; freq: number };
 type Playing = { midi: number };
 
 function freqOfMidi(midi: number, refA: number) {
@@ -84,34 +85,33 @@ export default function Tuner() {
     return midi === null ? [] : [midi];
   });
 
-  const [listening, setListening] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [reading, setReading] = useState<Reading | null>(null);
+  // The actual mic-listening/pitch-detection engine lives in `lib/tunerEngine.ts`, a plain
+  // module independent of this component's own mount lifecycle (see that file's own doc comment,
+  // and `lib/metronomeEngine.ts`'s, for why). This component is just a view over "listening":
+  // push settings in, read the live detected pitch back out. The tone generator below stays
+  // local — it's a momentary action, not a session worth keeping alive across navigation.
+  const tunerState = useSyncExternalStore(subscribeTuner, getTunerSnapshot, getTunerServerSnapshot);
+  const { listening, error, reading } = tunerState;
   const [playing, setPlaying] = useState<Playing | null>(null);
   const [inputs, setInputs] = useState<InputDevice[]>([]);
 
-  const inputRef = useRef<AudioInput | null>(null);
   const toneRef = useRef<ToneHandle | null>(null);
   const mountedRef = useRef(true);
-  const lastSeen = useRef(0);
-  const candidate = useRef<{ target: number; frames: number } | null>(null);
-  const cfg = useRef({ refA, stringMidis, playing: false, rms: SENSITIVITY.normal.rms });
 
   useEffect(() => {
-    cfg.current = {
+    updateTunerConfig({
       refA,
       stringMidis,
-      playing: playing !== null,
-      rms: (SENSITIVITY[sensitivity] ?? SENSITIVITY.normal).rms,
-    };
-  });
+      sensitivity,
+    });
+  }, [refA, stringMidis, sensitivity]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      inputRef.current?.stop();
       toneRef.current?.stop();
+      setTunerToneActive(false);
     };
   }, []);
 
@@ -136,68 +136,12 @@ export default function Tuner() {
     ? settings.inputDeviceId
     : "";
 
-  function handleFrame(freq: number | null) {
-    const { refA: ref, stringMidis: strings, playing: tonePlaying } = cfg.current;
-    // The mic would just hear our own reference tone.
-    if (tonePlaying) {
-      candidate.current = null;
-      return;
-    }
-    const now = performance.now();
-    if (freq === null) {
-      candidate.current = null;
-      if (now - lastSeen.current > HOLD_MS) setReading(null);
-      return;
-    }
-    const midi = 69 + 12 * Math.log2(freq / ref);
-    const target =
-      strings.length > 0
-        ? strings.reduce((best, s) => (Math.abs(midi - s) < Math.abs(midi - best) ? s : best))
-        : Math.round(midi);
-
-    const c = candidate.current;
-    candidate.current =
-      c && c.target === target ? { target, frames: c.frames + 1 } : { target, frames: 1 };
-    if (candidate.current.frames < 2) return;
-
-    lastSeen.current = now;
-    const raw = (midi - target) * 100;
-    setReading((prev) => ({
-      target,
-      freq,
-      cents: prev && prev.target === target ? prev.cents * 0.5 + raw * 0.5 : raw,
-    }));
-  }
-
   async function startListening() {
-    setError(null);
-    inputRef.current?.stop();
-    inputRef.current = null;
-    try {
-      const input = await startAudioInput(
-        inputDeviceId,
-        ({ freq }) => handleFrame(freq),
-        () => cfg.current.rms,
-      );
-      if (!mountedRef.current) {
-        input.stop();
-        return;
-      }
-      inputRef.current = input;
-      void listAudioInputs().then(setInputs);
-      setListening(true);
-    } catch {
-      setError("Couldn't open the audio input. Check the browser's microphone permission.");
-    }
+    const ok = await startTunerListening(inputDeviceId);
+    if (ok) void listAudioInputs().then(setInputs);
   }
 
-  function stopListening() {
-    inputRef.current?.stop();
-    inputRef.current = null;
-    candidate.current = null;
-    setListening(false);
-    setReading(null);
-  }
+  const stopListening = stopTunerListening;
 
   useSpaceToggle(listening ? stopListening : () => void startListening());
 
@@ -205,6 +149,7 @@ export default function Tuner() {
     toneRef.current?.stop();
     toneRef.current = null;
     setPlaying(null);
+    setTunerToneActive(false);
   }
 
   /** `midi` is the concert pitch to sound. */
@@ -212,7 +157,7 @@ export default function Tuner() {
     const wasSame = playing?.midi === midi;
     stopTone();
     if (wasSame) return;
-    setReading(null);
+    setTunerToneActive(true);
     const freq = freqOfMidi(midi, refA);
     toneRef.current = startTone(
       freq,
