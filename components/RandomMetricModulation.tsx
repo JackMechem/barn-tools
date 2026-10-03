@@ -29,6 +29,7 @@ import {
   accentsFromGroups,
   clampBpm,
   defaultAccents,
+  defaultSubAccents,
   nearestNoteValue,
   useTapTempo,
 } from "@/lib/meterControls";
@@ -60,6 +61,7 @@ const DEFAULT_SETTINGS = {
   beatUnit: 4,
   accents: [2, 1, 1, 1] as BeatLevel[],
   subdivision: 1,
+  subAccents: [] as BeatLevel[],
   volume: 0.8,
   soundId: DEFAULT_CLICK_SOUND_ID,
   minBarsPerModulation: 4,
@@ -101,6 +103,7 @@ export default function RandomMetricModulation() {
     matchToRealignment,
   } = settings;
   const accents = defaultAccents(beatsPerBar, settings.accents);
+  const subAccents = defaultSubAccents(beatsPerBar, subdivision, settings.subAccents);
   const minBarsPerModulation = Math.min(
     MAX_BARS_PER_MODULATION,
     Math.max(
@@ -154,6 +157,7 @@ export default function RandomMetricModulation() {
 
   const [running, setRunning] = useState(false);
   const [currentBeat, setCurrentBeat] = useState<number | null>(null);
+  const [currentSub, setCurrentSub] = useState(0);
   const [referenceBeat, setReferenceBeat] = useState<number | null>(null);
   const [referenceBpmDisplay, setReferenceBpmDisplay] = useState(bpm);
   // Mirrors preciseBpmRef for the render-time read in TempoHero; the ref itself is only read
@@ -176,17 +180,21 @@ export default function RandomMetricModulation() {
     beatsPerBar,
     accents,
     subdivision,
+    subAccents,
     volume,
     soundId,
   });
   // A second click track that runs alongside the main one (off the same engine, see `start()`),
   // keeping a reference pulse going the whole time (see `referenceBpmRef` below for what tempo
   // it actually tracks), so you can hear it against whatever the main click has modulated to.
+  // Always locked to `subdivision: 1` (see the `setSubdivision`/`SUBDIVISIONS` options, which only
+  // ever apply to the main click), so it never has any subdivision dots/accents of its own.
   const referenceSettingsRef = useRef({
     bpm,
     beatsPerBar,
     accents,
     subdivision: 1,
+    subAccents: [] as BeatLevel[],
     volume: referenceMuted ? 0 : volume,
     soundId: referenceSoundId,
   });
@@ -217,10 +225,11 @@ export default function RandomMetricModulation() {
       beatsPerBar,
       accents,
       subdivision,
+      subAccents,
       volume,
       soundId,
     };
-  }, [bpm, beatsPerBar, accents, subdivision, volume, soundId]);
+  }, [bpm, beatsPerBar, accents, subdivision, subAccents, volume, soundId]);
 
   useEffect(() => {
     // The reference click's tempo itself comes from `referenceBpmRef` (updated on modulation,
@@ -230,6 +239,7 @@ export default function RandomMetricModulation() {
       beatsPerBar,
       accents,
       subdivision: 1,
+      subAccents: [],
       volume: referenceMuted ? 0 : volume,
       soundId: referenceSoundId,
     };
@@ -349,13 +359,22 @@ export default function RandomMetricModulation() {
     // Both tracks run off the same scheduler tick (see `startClickEngine`), so the reference
     // click can only drift from the main one by its own intentional tempo difference — never
     // from browser timer jitter nudging one track's schedule but not the other's.
-    const tracks = [{ getSettings, onBeat: setCurrentBeat }];
+    const tracks = [
+      {
+        getSettings,
+        onBeat: (beat: number, sub: number) => {
+          setCurrentBeat(beat);
+          setCurrentSub(sub);
+        },
+      },
+    ];
     if (playOriginalTempo) {
       referenceSettingsRef.current = {
         bpm,
         beatsPerBar,
         accents,
         subdivision: 1,
+        subAccents: [],
         volume: referenceMuted ? 0 : volume,
         soundId: referenceSoundId,
       };
@@ -373,6 +392,7 @@ export default function RandomMetricModulation() {
     engineRef.current = null;
     setRunning(false);
     setCurrentBeat(null);
+    setCurrentSub(0);
     setReferenceBeat(null);
   }
 
@@ -383,18 +403,20 @@ export default function RandomMetricModulation() {
     updateSettings({ beatsPerBar: n, accents: defaultAccents(n, accents) });
   }
 
-  function applySignature(beats: number, unit: number, groups: number[]) {
-    updateSettings({
-      beatsPerBar: beats,
-      beatUnit: unit,
-      accents: accentsFromGroups(groups),
-    });
-  }
-
   function cycleBeat(index: number) {
     updateSettings({
       accents: accents.map((level, i) =>
         i === index ? NEXT_LEVEL[level] : level,
+      ),
+    });
+  }
+
+  function cycleSub(beatIndex: number, subIndex: number) {
+    const dotCount = Math.max(0, Math.round(subdivision) - 1);
+    const flatIndex = beatIndex * dotCount + subIndex;
+    updateSettings({
+      subAccents: subAccents.map((level, i) =>
+        i === flatIndex ? NEXT_LEVEL[level] : level,
       ),
     });
   }
@@ -451,7 +473,6 @@ export default function RandomMetricModulation() {
               accents={accents}
               subdivision={subdivision}
               onChangeBeats={changeBeats}
-              onApplySignature={applySignature}
               onSetBeatUnit={setBeatUnit}
               onSetSubdivision={setSubdivision}
               onApplyGroups={(groups) =>
@@ -630,6 +651,10 @@ export default function RandomMetricModulation() {
           accents={accents}
           currentBeat={running ? currentBeat : null}
           onCycle={cycleBeat}
+          subdivision={subdivision}
+          subAccents={subAccents}
+          currentSub={currentSub}
+          onCycleSub={cycleSub}
         />
 
         {running && (

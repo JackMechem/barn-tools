@@ -13,7 +13,6 @@ import TunesTab from "@/components/TunesTab";
 import TunesToLearnTab from "@/components/TunesToLearnTab";
 import {
   BookIcon,
-  GlobeIcon,
   GoogleIcon,
   ListIcon,
   LogOutIcon,
@@ -38,14 +37,7 @@ function PageShell({ children, wide }: { children: ReactNode; wide?: boolean }) 
   );
 }
 
-type AccountView =
-  | "profile"
-  | "tunes"
-  | "tunesToLearn"
-  | "publicProfile"
-  | "following"
-  | "security"
-  | "danger";
+type AccountView = "profile" | "tunes" | "tunesToLearn" | "following" | "security" | "danger";
 
 /** Turns a thrown Error into UI text — Convex actions surface a real message (e.g. our own
     "Enter your password to confirm."), but a wrong password comes back as a long, internal-
@@ -635,12 +627,6 @@ export default function AccountPage() {
             onClick={() => setView("tunesToLearn")}
           />
           <SidebarNavButton
-            active={view === "publicProfile"}
-            icon={GlobeIcon}
-            label="Public Profile"
-            onClick={() => setView("publicProfile")}
-          />
-          <SidebarNavButton
             active={view === "following"}
             icon={UsersIcon}
             label="Following"
@@ -665,44 +651,45 @@ export default function AccountPage() {
 
         <div className="flex min-w-0 flex-1 flex-col gap-6">
           {view === "profile" && (
-            <section className="flex flex-col gap-4 rounded-2xl bg-surface p-5 text-left">
-              <h2 className="text-lg font-semibold">Profile</h2>
-              <div className="flex flex-col gap-3 text-sm">
-                <div className="flex flex-col gap-1">
-                  <span className="text-muted">Email</span>
-                  <span className="font-medium">{user?.email ?? "—"}</span>
-                </div>
-                {user?.name && (
+            <>
+              <section className="flex flex-col gap-4 rounded-2xl bg-surface p-5 text-left">
+                <h2 className="text-lg font-semibold">Profile</h2>
+                <div className="flex flex-col gap-3 text-sm">
                   <div className="flex flex-col gap-1">
-                    <span className="text-muted">Name</span>
-                    <span className="font-medium">{user.name}</span>
+                    <span className="text-muted">Email</span>
+                    <span className="font-medium">{user?.email ?? "—"}</span>
                   </div>
-                )}
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-muted">Signed in with</span>
-                  <div className="flex flex-wrap gap-2">
-                    {hasPassword && (
-                      <span className="rounded-full bg-background px-3 py-1 text-xs font-medium">
-                        Password
-                      </span>
-                    )}
-                    {hasGoogle && (
-                      <span className="flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs font-medium">
-                        <GoogleIcon className="h-3.5 w-3.5" />
-                        Google
-                      </span>
-                    )}
+                  {user?.name && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-muted">Name</span>
+                      <span className="font-medium">{user.name}</span>
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-muted">Signed in with</span>
+                    <div className="flex flex-wrap gap-2">
+                      {hasPassword && (
+                        <span className="rounded-full bg-background px-3 py-1 text-xs font-medium">
+                          Password
+                        </span>
+                      )}
+                      {hasGoogle && (
+                        <span className="flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs font-medium">
+                          <GoogleIcon className="h-3.5 w-3.5" />
+                          Google
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </section>
+              </section>
+              <PublicProfileEditor />
+            </>
           )}
 
           {view === "tunes" && <TunesTab />}
 
           {view === "tunesToLearn" && <TunesToLearnTab />}
-
-          {view === "publicProfile" && <PublicProfileEditor />}
 
           {view === "following" && <FollowLists />}
 

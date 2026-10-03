@@ -8,61 +8,132 @@ const LEVEL_LABEL: Record<BeatLevel, string> = {
   0: "muted",
 };
 
-/** The row of beat circles shared by the Metronome and Jam Practice pages. */
+/** A single vertical bar — a main beat (numbered) or a subdivision tick (unnumbered) — shared by
+    both rows below so they look and behave identically apart from the number. */
+function Bar({
+  level,
+  active,
+  label,
+  number,
+  dim,
+  onClick,
+}: {
+  level: BeatLevel;
+  active: boolean;
+  label: string;
+  /** Shown top-left inside the bar; omitted for a subdivision tick. */
+  number?: number;
+  dim: string;
+  onClick?: () => void;
+}) {
+  const className = `relative ${dim} shrink-0 rounded-md transition-[transform,filter] ${
+    level === 2
+      ? "bg-accent text-accent-foreground"
+      : level === 1
+        ? "bg-foreground text-background"
+        : "bg-surface-hover text-muted opacity-50 ring-1 ring-inset ring-muted/40"
+  } ${active ? "scale-105 brightness-110 ring-2 ring-accent ring-offset-2 ring-offset-background" : ""}`;
+  const content = number !== undefined && (
+    <span
+      className={`absolute left-1.5 top-1 text-xs font-semibold tabular-nums ${level === 0 ? "line-through" : ""}`}
+    >
+      {number}
+    </span>
+  );
+  return onClick ? (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${label}. Click to change.`}
+      title={label}
+      className={className}
+    >
+      {content}
+    </button>
+  ) : (
+    <div title={label} className={className}>
+      {content}
+    </div>
+  );
+}
+
+/** The row of beat bars shared by the Metronome, Polyrhythm Metric Modulation Metronome, and Jam
+    Practice pages — a sequencer-style strip (one tall bar per beat, grouped with its subdivision
+    ticks) rather than the small numbered circles this used to be, per a direct follow-up request
+    with a reference screenshot. */
 export default function BeatIndicator({
   accents,
   currentBeat,
   onCycle,
   size = "md",
+  subdivision = 1,
+  subAccents = [],
+  currentSub = 0,
+  onCycleSub,
 }: {
   accents: BeatLevel[];
   currentBeat: number | null;
   /** When given, beats are buttons that cycle accent / normal / muted. */
   onCycle?: (index: number) => void;
-  /** "sm" shrinks the whole thing (numbers included) — for a smaller reference metronome. */
+  /** "sm" shrinks the whole thing — for a smaller reference metronome. */
   size?: "md" | "sm";
+  /** Clicks per beat (`lib/meterControls.ts`'s `SUBDIVISIONS`) — 1 (the default) means no
+      subdivision at all, so no extra bars show. Otherwise, `subdivision - 1` unnumbered bars
+      follow every beat (e.g. eighth notes, subdivision 2: one tick after each beat), marking
+      where each subdivision click falls within that beat. */
+  subdivision?: number;
+  /** One accent level per subdivision tick, flattened beat-major (`beat * (subdivision - 1) +
+      subIndex`) — same shape `lib/clickEngine.ts`'s `ClickSettings.subAccents` and
+      `lib/meterControls.ts`'s `defaultSubAccents` use. A missing/short entry defaults to
+      "normal", same as the beats' own `accents[i] ?? 1`. */
+  subAccents?: BeatLevel[];
+  /** Which tick of `currentBeat` is currently sounding: `0` means the main beat itself; `1..
+      subdivision-1` lights up that subdivision tick instead. Mirrors `lib/clickEngine.ts`'s
+      `onBeat(beat, sub)` almost exactly — pass `sub` straight through. */
+  currentSub?: number;
+  /** When given, subdivision ticks are buttons that cycle accent / normal / muted too, the same
+      interaction `onCycle` gives the beats — called with the beat index and the tick's own
+      0-based position within that beat (`0` is the first tick after the beat). */
+  onCycleSub?: (beatIndex: number, subIndex: number) => void;
 }) {
   const small = size === "sm";
-  const dim = small ? "h-7 w-7 text-xs" : "h-11 w-11 text-sm";
-  const gap = small ? "gap-1" : "gap-2";
-  // The ring-offset look needs more breathing room than these tight, small circles have, so
-  // the small size just gets a plain ring instead — offsetting it looked clipped/warped.
-  const ring = small
-    ? "scale-110 ring-2 ring-accent"
-    : "scale-110 ring-2 ring-accent ring-offset-2 ring-offset-background";
+  const dim = small ? "h-10 w-7" : "h-16 w-10";
+  const dotCount = Math.max(0, Math.round(subdivision) - 1);
 
   return (
     <div
-      className={`flex flex-wrap justify-center ${gap}`}
+      className={`flex flex-wrap items-end justify-center ${small ? "gap-2" : "gap-3"}`}
       role="group"
       aria-label="Beats in bar"
     >
-      {accents.map((level, i) => {
-        const className = `flex ${dim} items-center justify-center rounded-full font-semibold tabular-nums transition-transform ${
-          level === 2
-            ? "bg-accent text-accent-foreground"
-            : level === 1
-              ? "bg-surface text-foreground"
-              : "bg-surface text-muted line-through opacity-60"
-        } ${currentBeat === i ? ring : ""}`;
-        const label = `Beat ${i + 1}: ${LEVEL_LABEL[level]}`;
-        return onCycle ? (
-          <button
-            key={i}
-            type="button"
-            onClick={() => onCycle(i)}
-            aria-label={`${label}. Click to change.`}
-            title={label}
-            className={className}
-          >
-            {i + 1}
-          </button>
-        ) : (
-          <div key={i} title={label} className={className}>
-            {i + 1}
-          </div>
-        );
-      })}
+      {accents.map((level, i) => (
+        // A small gap *within* a beat's own bars, a bigger one *between* beats (the outer
+        // container's gap above) — the grouping the reference screenshot shows.
+        <div key={i} className="flex items-end gap-0.5">
+          <Bar
+            level={level}
+            active={currentBeat === i && currentSub === 0}
+            label={`Beat ${i + 1}: ${LEVEL_LABEL[level]}`}
+            number={i + 1}
+            dim={dim}
+            onClick={onCycle && (() => onCycle(i))}
+          />
+          {Array.from({ length: dotCount }, (_, d) => {
+            const flatIndex = i * dotCount + d;
+            const dotLevel = subAccents[flatIndex] ?? 1;
+            return (
+              <Bar
+                key={d}
+                level={dotLevel}
+                active={currentBeat === i && currentSub === d + 1}
+                label={`Subdivision after beat ${i + 1}${dotCount > 1 ? ` (${d + 1}/${dotCount})` : ""}: ${LEVEL_LABEL[dotLevel]}`}
+                dim={dim}
+                onClick={onCycleSub && (() => onCycleSub(i, d))}
+              />
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

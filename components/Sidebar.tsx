@@ -7,6 +7,7 @@ import AccountMenu from "@/components/AccountMenu";
 import { OPEN_PALETTE_EVENT } from "@/components/CommandPalette";
 import PracticeTimerWidget from "@/components/PracticeTimerWidget";
 import ThemeModal from "@/components/ThemeModal";
+import Wordmark from "@/components/Wordmark";
 import {
   NAV_LINKS,
   SearchIcon,
@@ -396,7 +397,7 @@ export default function Sidebar() {
               aria-label="sheddex home"
               className="rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
-              <span className="text-xl font-bold tracking-tight text-accent">sheddex</span>
+              <Wordmark className="h-8" textClassName="text-xl" />
             </Link>
             <button
               type="button"
@@ -452,9 +453,7 @@ export default function Sidebar() {
               aria-label="sheddex home"
               className="min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
-              <span className="truncate text-lg font-bold tracking-tight text-accent">
-               sheddex 
-              </span>
+              <Wordmark className="h-8 w-full" textClassName="text-lg" />
             </Link>
           )}
         </div>

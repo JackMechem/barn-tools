@@ -6,6 +6,7 @@ import { useQuery } from "convex/react";
 import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { api } from "@/convex/_generated/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
+import UserAvatar from "@/components/UserAvatar";
 import { GoogleIcon, UserIcon } from "@/components/tools";
 
 /** Same button shape as Sidebar's ThemeButton (collapsed/large props, identical styling) so this
@@ -286,6 +287,7 @@ export default function AccountMenu({
 }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const user = useQuery(api.users.current);
+  const profile = useQuery(api.profiles.getMine, isAuthenticated ? {} : "skip");
   const [signInOpen, setSignInOpen] = useState(false);
 
   if (isLoading) {
@@ -300,7 +302,9 @@ export default function AccountMenu({
   }
 
   if (isAuthenticated) {
-    const label = user?.email ?? user?.name ?? "Account";
+    // Until a username is actually set (a brief window — `UsernamePrompt` forces one right after
+    // sign-up/sign-in), fall back to email/name, the same label this button always showed.
+    const label = profile?.username ? `@${profile.username}` : (user?.email ?? user?.name ?? "Account");
     return (
       <Link
         href="/account"
@@ -308,7 +312,7 @@ export default function AccountMenu({
         title={collapsed ? label : undefined}
         className={buttonClass(collapsed, large)}
       >
-        <UserIcon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
+        <UserAvatar url={profile?.avatarUrl ?? null} size="sm" />
         {!collapsed && <span className="truncate">{label}</span>}
       </Link>
     );

@@ -46,7 +46,193 @@ what exists, what's next, and the honest state of what's been verified.
   count-off metronome. Can draw from your own tune list or a built-in library of ~630 jazz
   standards (`lib/standards.ts`).
 - **Metronome** — configurable time signature (including odd/custom meters), subdivisions,
-  per-beat accents, tap tempo.
+  per-beat accents, tap tempo. Per a direct follow-up, the subdivision clicks (the "&" in eighth
+  notes, etc.) now show in `BeatIndicator` too — not just a static marker, but genuinely live and
+  clickable the same way the beats already were: they light up as they actually play, and clicking
+  one cycles it through accent/normal/muted (`lib/clickEngine.ts`'s new `ClickSettings.subAccents`,
+  flattened beat-major — `beat * (subdivision - 1) + subIndex` — and `lib/meterControls.ts`'s
+  matching `defaultSubAccents`). This needed `onBeat` to change from firing only on the main beat
+  (`sub === 0`) to firing on *every* tick, so a caller can track which subdivision just sounded
+  (`currentSub`) the same way it already tracked `currentBeat` — the only two call sites, Metronome
+  and Polyrhythm Metric Modulation Metronome, were updated accordingly; Jam Practice's own
+  count-off doesn't go through this engine at all, so it's unaffected. An accented subdivision tick
+  reuses the main beat's `normalFreq` at a lower volume (0.4, between a normal beat's 0.55 and a
+  normal subdivision's 0.25) — distinguishable by loudness, not pitch, a deliberate simplification
+  over adding a fourth frequency to every `ClickSound`. The Polyrhythm tool's secondary reference
+  click stays locked to `subdivision: 1` (as it always was) and so never shows or needs subdivision
+  ticks of its own.
+
+  **`BeatIndicator` itself was then redesigned from numbered circles to a vertical-bar "sequencer
+  strip"** per a direct follow-up with a reference screenshot (a row of tall colored bars, each
+  beat's number printed top-left inside its own bar, its subdivision ticks as shorter unnumbered
+  bars immediately after it). A shared `Bar` sub-component now renders both a beat and a
+  subdivision tick identically apart from the number — same three-level color scheme (`bg-accent`
+  for accent, `bg-foreground`/`text-background` for a bold "normal" bar, a faint ring-only hollow
+  look for muted) and the same `active` treatment (scale/brightness/ring) a beat circle used to
+  get, now shared by whichever bar — beat or tick — the engine just sounded. Bars within one beat
+  sit close together (a small `gap-0.5`); the gap between beats is the container's own larger
+  `gap-3`/`gap-2` (normal/`size="sm"`), matching the grouping the screenshot shows. `tsc`, `eslint`,
+  and `next build` all pass. Verified with a synthetic script against a verbatim copy of the
+  updated scheduling loop (can't import `lib/clickEngine.ts` directly outside the browser — it
+  reaches for `window.AudioContext`): a muted subdivision tick schedules no sound at all, an
+  accented one schedules at the expected frequency/gain, and `onBeat` fires for every tick in the
+  right beat/sub order. **Not verified**: how the bar strip actually looks/feels in a real
+  browser — whether it reads as close to the reference screenshot, whether the muted "hollow ring"
+  look is legible at this size, and whether the active bar's ring-offset still looks right at the
+  smaller `size="sm"` dimensions used for the Polyrhythm tool's reference click row.
+
+  **"Structures" for odd/changing meters** (`lib/structure.ts`, `components/StructureEditor.tsx`)
+  — per a direct follow-up request with a reference screenshot (from another app's "song form"
+  editor, used as a UI/concept reference, not copied pixel-for-pixel): a structure chains bars of
+  *different* time signatures in a fixed, looping sequence instead of one meter for the whole run
+  — the request's own example, 2 bars of 11/8 then a bar of 12/8 then a bar of 15/8, is exactly
+  three named sections (`A`: 2 bars of 11/8, `B`: 1 bar of 12/8, `C`: 1 bar of 15/8) arranged into
+  a `form` of `[A, B, C]` that loops back to `A` after `C`. Modeled the same way a real tune's form
+  is, per an explicit choice over a simpler flat list (asked directly, since the request's own
+  example doesn't need reuse): a handful of reusable, named `sections` (`lib/structure.ts`'s
+  `StructureSection` — bars, beatsPerBar/beatUnit, accents, subdivision, subAccents, i.e. a
+  complete self-contained little meter, the same shape the plain top-level meter already is), and
+  a `form` that's just an ordered list of section ids that can repeat the same one more than once
+  (e.g. `[A, A, B, C]`) rather than needing a second copy of a section for every repeat. Off by
+  default (`useStructure: false`); every existing field keeps behaving exactly as it always has
+  while it's off — a `SwitchRow` inside the existing "Meter & subdivision" panel swaps that panel's
+  content between the plain `MeterOptions` form and the new `StructureEditor` rather than adding a
+  second panel.
+
+  **Playback**: `Metronome.tsx`'s `getSettings(beat, sub)` — called by the click engine right as it
+  schedules each tick, same function RandomMetricModulation already uses to land a tempo change
+  exactly on a bar line — now also detects `beat === 0 && sub === 0` (a new bar starting) to decide
+  whether the *current* form entry has finished its bar count and, if so, advances to the next one
+  (wrapping past the end), the same "detect a bar boundary before it affects scheduling" trick,
+  just switching the whole meter (`beatsPerBar`/`accents`/`subdivision`/`subAccents`) instead of the
+  tempo. `bpm`/`volume`/`soundId` stay global across every section — only the meter itself changes
+  per section, matching the request (no mention of the tempo itself changing through the form).
+  `structFormIndexRef`/`structBarsIntoRef`/`structSeenFirstRef` (reset in `start()`, same pattern as
+  `RandomMetricModulation`'s own `barsSinceModRef`/`seenFirstBeatRef`) track the state machine;
+  `structPlayback` (React state, updated from inside `getSettings`) mirrors it for display and
+  resets to `null` on `stop()` — read as `?? 0` everywhere it drives which section the main page
+  shows/edits, so there's always a sensible section to look at even before Start has ever been
+  pressed (defaulting to the form's first entry).
+
+  **Editing**: `StructureEditor.tsx` — a "Form" strip of chips (one per form entry, reusing the
+  same name-plus-"the section it is" idea everywhere), each with a remove button for that one
+  occurrence and, per a direct follow-up request ("make them draggable, same for mobile"),
+  genuinely draggable to an arbitrary position: Pointer Events
+  (`onPointerDown`/`onPointerMove`/`onPointerUp`/`onPointerCancel` + `setPointerCapture`, the same
+  mechanism `Sidebar.tsx`'s own resize handle already uses, not the HTML5 drag-and-drop API, which
+  doesn't work on touch devices without unreliable polyfills), so one implementation drags with a
+  mouse, a finger, or a pen alike. Each chip's bounding rect is measured once at drag-start into a
+  fixed reference grid (`dragRectsRef`) — the *physical* position of slot N in the row never moves
+  as the underlying form reorders, only which chip's data renders there does, so comparing the
+  live pointer position against these frozen rects (nearest-center-wins) is enough to know which
+  slot it's over, with no re-measuring mid-drag. Crossing into a different slot calls
+  `reorderForm(structure, from, to)` (a splice-out/splice-in move to an arbitrary position) and
+  re-centers the dragged chip's `transform: translate()` offset fresh against its new slot
+  (recomputed from the *current* slot each move, never accumulated from the drag's start) — so
+  there's no jump the instant it crosses into a new position. `touch-none` on the chip stops the
+  browser's own touch-scroll from fighting the drag; a press that starts on the chip's own remove
+  button (`closest("button")`) is left alone as that button's own click, not a drag. The original
+  ←/→ adjacent-swap buttons (`moveFormEntry`) were removed outright once dragging covered the same
+  job, per a direct follow-up ("get rid of the arrows") — `moveFormEntry` itself was deleted too
+  once nothing called it anymore, rather than left as unused dead code. Verified with a synthetic
+  script (the pure `reorderForm` splice logic, and the nearest-slot distance math against a small
+  fixed grid of mock rects — a pointer past a slot boundary correctly picks up the next slot, and
+  one far past the end clamps to the last slot rather than extrapolating past it) — **not
+  verified**: how an actual touch/mouse drag feels in a real browser, since this sandbox has
+  neither.
+
+  "Add to form" buttons (one per defined section, `+ A` `+ B` ...) append to the end; and a "Sections" list
+  of collapsible cards, each a complete little meter editor — name, bar count (`SteppedField`), the
+  *exact* `MeterOptions` the plain meter uses (presets, beats/unit steppers, accent grouping,
+  subdivision picker), and its own `BeatIndicator` (`size="sm"`) for that section's own
+  accent/subdivision-accent pattern — reusing every existing building block rather than a second
+  copy of any of them. The main page's own `BeatIndicator` (above Start/Stop) tracks whichever
+  section is current (`activeSection`) instead of the plain top-level meter while a structure is
+  active, including routing its `onCycle`/`onCycleSub` to edit that section directly
+  (`cycleSectionAccent`/`cycleSectionSubAccent`) — the same live-editable convenience the plain
+  meter already had, just aimed at a different target. Start/Stop is disabled with an empty form
+  (`canStart`), since there'd be nothing to actually play.
+
+  Verified with a synthetic script against a copy of the bar-counting/section-switching state
+  machine (can't import the real `getSettings` — it closes over React refs) using the request's own
+  example (`A`: 2×11/8, `B`: 1×12/8, `C`: 1×15/8, form `[A, B, C]`): the section/beatsPerBar
+  sequence over 8 simulated bars comes out exactly `A A B C A A B C` / `11 11 12 15 11 11 12 15` —
+  two bars of 11/8, a bar of 12/8, a bar of 15/8, looping, matching the request exactly. `tsc`,
+  `eslint`, and `next build` all pass. **Not verified**: anything about how this actually looks or
+  feels in a real browser — the Form chips' drag-to-reorder (see its own paragraph above), a
+  section's inline `MeterOptions`/`BeatIndicator` editor actually usable at the smaller card width,
+  the empty-state messaging, and whether switching meters exactly on the bar line actually sounds
+  seamless rather than having any audible hiccup — this sandbox still has no working browser or
+  audio output.
+
+  **"Tempo note value" — letting BPM refer to a different note value than the beat unit** — per a
+  direct follow-up request with a concrete example: in 4/8 time, type "quarter note = 275" and have
+  the metronome actually click eighth notes at 550 (twice as fast), rather than 275 always meaning
+  whatever the meter's own beat unit happens to be (the engine's only behavior before this — `lib/
+  clickEngine.ts`'s `ClickSettings.bpm` has no concept of note values at all, it's always just
+  "clicks per minute" for whatever the engine is currently counting as one beat). `lib/
+  meterControls.ts`'s new `convertTempo(bpm, fromNoteValue, toNoteValue)` is the one-line
+  conversion (`bpm * toNoteValue / fromNoteValue` — an eighth note is half as long as a quarter, so
+  twice as many fit in the same minute) everything else here is built on. A new "Tempo note value"
+  `Select` sits right under the BPM hero number (`TEMPO_NOTE_MATCH`, a `0` sentinel for "match beat
+  unit" — the persisted field itself is `tempoNoteValue: number | null`, `null` meaning the same
+  "match beat unit" default, so an existing saved tempo keeps meaning exactly what it always did
+  unless this is explicitly changed); a small "= 550 BPM at eighth note clicks" line appears
+  underneath whenever the chosen note value actually differs from the current beat unit, so the
+  real click rate is never a surprise. `Metronome.tsx`'s `getSettings` — already the one place that
+  resolves the engine's actual per-tick `ClickSettings` — now converts the displayed `bpm` through
+  whichever beat unit is *currently* active before handing it to the engine: the plain meter's own
+  `beatUnit` normally, or (in structure mode) the *active section's* `beatUnit`, which can differ
+  bar to bar — `tempoNoteValue` itself stays one single global field either way (tempo, like
+  volume/tone, doesn't change per-section), only the conversion's target note value does.
+  `settingsRef` gained `beatUnit`/`tempoNoteValue` fields to make this resolvable from inside
+  `getSettings` (which runs off the engine's own scheduler tick, not a render) without closing over
+  stale render-time values. Verified: the conversion formula itself, directly, against the
+  request's own numbers (`convertTempo(275, 4, 8) === 550`, confirming "twice as fast"; a
+  round-trip back through the same two note values returns the original 275; converting between
+  the same note value is a no-op). `tsc`, `eslint`, and `next build` all pass.
+
+  Three direct follow-ups landed on top of this. First, "put it to the left of the bpm didget": the
+  picker moved from its own row below the BPM number into the number's own row, immediately to its
+  left, via a new optional `before?: React.ReactNode` prop on `TempoHero`
+  (`components/MeterFields.tsx`). Then, "put the drop down on top of the big number actually":
+  `before` was replaced with `aboveNumber?: React.ReactNode` instead, rendered as the first child
+  of the narrow `w-40` column the number itself sits in (so it's centered directly above the
+  digits, not off to the side in the wider −/+ row) — every other caller still passes neither, so
+  both changes stay purely additive. Finally, "make the dropdown have actual notes": each option
+  now shows a real engraved note glyph via a new
+  `NoteValueIcon` (`components/MeterFields.tsx`, next to `SubdivisionIcon`, same notehead/stem
+  proportions as that component's own beamed notes, just for one note standing alone) — hollow for
+  whole/half, filled with a stem for quarter and shorter, plus one flag per halving below a quarter
+  (eighth = 1, sixteenth = 2, ...), rather than text alone. The dropdown's own labels were
+  shortened for this compact spot (`SHORT_NOTE_NAME` — "Quarter", "Eighth", "16th", ...) since
+  there's much less room here than in the full-sentence conversion readout below it, which still
+  uses `NOTE_VALUE_NAMES`' full names ("Quarter note"). **Not verified**: how the new Select/
+  conversion-readout actually looks positioned under/beside the BPM number, whether the hand-drawn
+  note glyphs actually read as recognizable whole/half/quarter/eighth/etc. notes at this small a
+  size, and — the thing that actually matters most here — whether the resulting click rate is
+  genuinely audible and in time once played for real, since this sandbox has no audio output at
+  all.
+
+  **The beats-per-bar/beat-unit control itself was simplified and shrunk**, in two more direct
+  follow-ups. First, "get rid of the presets": the row of common-signature buttons (2/4, 3/4, 4/4,
+  ...) that used to lead `MeterOptions` is gone outright — the beats/unit steppers right below them
+  are now the only way to set a meter. Since `MeterOptions` is the one shared component behind the
+  plain Metronome meter, the Polyrhythm tool's own meter, *and* every Structure section's inline
+  editor, this one removal applies everywhere at once; its now-unused `onApplySignature` prop (and
+  each of those three call sites' own `applySignature` helper function) was deleted too rather than
+  left as dead code, and `SIGNATURE_PRESETS` itself stayed in `lib/meters.ts` since `TuneFields.tsx`
+  still uses it for an unrelated tune-time-signature picker. Second, "make the time signature
+  smaller and easier to understand what it is": `SteppedField`/`BeatUnitField` both gained an
+  optional `size?: "md" | "sm"` prop (new `CIRCLE_BUTTON_SM`/`CIRCLE_INPUT_SM` constants,
+  module-private since nothing outside this file needs them) — `"sm"` only inside `MeterOptions`'s
+  own beats/unit pair, so Polyrhythm's own direct `SteppedField` call ("Bars between modulations")
+  and a Structure section's "Bars" field keep their original, larger size. The two numbers'
+  `showLabel` also flipped from `false` to its own default of `true`, so "Beats per bar"/"Beat
+  unit" are now always-visible captions (not hidden behind the panel's "?" hint toggle the way they
+  were before), plus a small "Time signature" heading above both of them tying the whole stacked
+  pair together as one concept. `tsc`, `eslint`, and `next build` all pass. **Not verified**: how
+  any of this actually reads once rendered — this sandbox still has no working browser.
 - **Polyrhythm Metric Modulation Metronome** (`components/RandomMetricModulation.tsx`) — same click engine
   and meter controls as Metronome, but every N bars it randomly jumps the tempo by a musical
   ratio (3:2, 4:3, 2:1, etc. — `lib/metricModulation.ts`), bouncing to the ratio's inverse if
@@ -1240,6 +1426,106 @@ what exists, what's next, and the honest state of what's been verified.
   short signed-in label (`AccountMenu.tsx`'s collapsed button, `AccountPage.tsx`'s own subtitle).
   Gated on both `useConvexAuth()`'s `isAuthenticated` and the `api.users.current` query actually
   resolving, so a signed-in visitor never sees a flash of the signed-out version first.
+
+  (Note: the "A few favorites" numbered-list section described just above is no longer in the
+  actual file as of this session — it was gone before this round's own changes started, with
+  nothing in this document recording when or why. Flagging the drift rather than silently leaving
+  it, the same way this file has caught stale documentation before, e.g. the "sheddex" rename
+  bullet's own note about a four-file list going stale by the next rename.)
+
+  **Redesigned again** per a direct follow-up with a reference screenshot (another site's own
+  marketing landing page — a bold two-line headline, two CTA buttons, and a cluster of small
+  floating product-photo widgets around a big centered phone mockup, with a customer-logo strip
+  along the bottom) — used purely as a *layout* reference, not copied: "instead of the photos/
+  widgets... put little interactive previews of the tools... instead of the buttons... put a
+  search bar." Two concrete changes followed from that:
+  - The hero's call-to-action buttons (this page never actually had any — the closest equivalent
+    was a plain "press / to search" text hint) became a real, styled search-bar-shaped `<button>`
+    that dispatches `components/CommandPalette.tsx`'s own `OPEN_PALETTE_EVENT` — the exact same
+    event `Sidebar.tsx`'s own desktop search button already fires, so this opens the identical `/`
+    command palette, not a second, parallel search implementation.
+  - The reference's floating product photos became `PreviewCluster` — five small tool previews
+    (Metronome, Jam Practice, Chord Charts, Guess the Interval, Polyrhythm Metric Modulation
+    Metronome), each a real `Link` to that tool so the whole tile is what's "interactive" here;
+    there's no live audio or state running on the landing page itself. One genuinely reuses a real,
+    static-friendly piece of that tool's own UI (`BeatIndicator`, passed a fixed `currentBeat={0}`
+    so beat 1 shows lit, no engine running) rather than an approximation of it; the other four are
+    small hand-built stand-ins using this app's own existing tokens (`bg-surface`, `bg-accent`,
+    the same icons `NAV_LINKS` already uses for each tool) rather than stock photos or screenshots,
+    since there was no cheap way to drop in a real live preview of a chord chart or an interval
+    quiz without the complexity (and landing-page weight) of their actual stateful components.
+    Scattered via absolute positioning (slightly rotated, overlapping the way the reference's own
+    photos did) only at `sm:` and up; below that it's a plain, un-rotated 2-column grid (the hero
+    Metronome tile spanning both columns) — deliberately not the same absolute-position trick at
+    phone width, which would be fragile to get right blind. The reference's bottom customer-logo
+    strip has no real equivalent here (this app has no customers to name) and was dropped rather
+    than forced into a parallel that wouldn't mean anything.
+
+  **Actually verified in a real browser this time** — a first for this page's own revision
+  history, and for most of this document's many "no working browser here" caveats: Playwright's
+  own downloaded Chromium still fails on this machine (missing `libglib-2.0.so.0`, no sudo to fix
+  it), but a working Chromium turned out to be reachable anyway via `nix shell nixpkgs#chromium`
+  (Nix needs no root), driven over CDP with `playwright-core` (a plain npm install, no browser
+  binary download, since it only connects to the nix-provided one). Against the real dev server:
+  the page renders with zero console errors at both a 1280×900 desktop size and a 390×844 phone
+  size; the scattered cluster doesn't overlap or overflow at desktop width (confirmed by screenshot
+  — see this session's own notes for what that first pass caught: the Metronome tile's
+  `BeatIndicator` wrapped onto two rows at the card's ~208px width using its default size, fixed by
+  passing `size="sm"`); the mobile 2-column grid reads cleanly; and clicking the new search button
+  genuinely opens the command palette (`paletteVisible` confirmed via a Playwright locator, not
+  just "a click didn't throw"). This capability (nix chromium + playwright-core over CDP) isn't
+  yet captured as a reusable project skill — worth a `/run-skill-generator` pass at some point so
+  future sessions don't have to rediscover it from scratch.
+
+  **A real bug this same verification setup then caught**, reported directly ("when hovering over
+  the metronome widget thing it goes too far down"): the hero `PreviewCard`'s centering
+  (`left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`, needed to center a `w-52` box at the
+  cluster's exact midpoint) and `PreviewCard`'s own `hover:-translate-y-1` lift lived on the *same*
+  element. Tailwind v4 compiles every `translate-*` utility to the same `--tw-translate-y` custom
+  property plus a full `translate: var(--tw-translate-x) var(--tw-translate-y)` reassignment —
+  confirmed by reading the actual compiled rules directly
+  (`document.styleSheets[i].cssRules`, recursing into the `@layer`/`@media (hover: hover)` blocks
+  Tailwind nests them in) rather than assumed from how the utility classes read. Since
+  `.hover\:-translate-y-1:hover` has higher specificity than plain `.-translate-y-1\/2` (the
+  `:hover` pseudo-class adds to it), the hover rule always wins while hovering — snapping
+  `--tw-translate-y` from `-50%` (centering) to `-0.25rem` (the intended lift), which reads as the
+  card suddenly dropping down about half its own height, not lifting. Fixed by moving the
+  centering transform onto a plain wrapper `<div>` around the hero `PreviewCard`, so the Link
+  itself only ever carries the hover transform, with no base translate-y for it to clobber — the
+  four scattered (non-hero) cards never had this problem, since they're positioned with `rotate-*`
+  utilities instead, a separate CSS custom property (`--tw-rotate`) that doesn't collide with
+  `--tw-translate-y` at all. Caught and fixed using the same nix-chromium setup described above —
+  reading the exact compiled CSS rule text to confirm the specificity/cascade mechanism by hand,
+  since this particular headless Chromium build reports `(hover: hover)` as `false` — a real,
+  separately-noted limitation of this nix-chromium setup — so simulated mouse hovers never
+  actually trigger `:hover` styles to screenshot before/after directly, even after trying to
+  override it via CDP's `Emulation.setEmulatedMedia`. `tsc`, `eslint`, and `next build` all pass.
+
+  **The waveform-behind-the-wordmark treatment, extended app-wide.** Three more direct follow-ups:
+  first, "overlay the sheddex logo over the bars" — the hero's waveform strip and "sheddex" title
+  used to just stack vertically (bars, then a gap, then the heading); now they share one box, bars
+  centered (`items-center`, not the strip's old `items-end` baseline-only growth) so a tall bar can
+  extend both above and below the text's own line, with the heading rendered on top
+  (`position: relative`, painted after its absolutely-positioned sibling in DOM order — no
+  `z-index` needed for two `auto`-stacked siblings). Second, "lower opacity of waveform" —
+  `bg-accent/40` → `bg-accent/20`, so the bars read as texture behind the bold text rather than
+  competing with it. Third, "do the same thing for the sheddex in the side bar and mobile menu":
+  rather than copy the hero's markup twice more (a third drifting copy), the whole effect moved
+  into a new shared `components/Wordmark.tsx`, used by the hero *and* both of `Sidebar.tsx`'s own
+  "sheddex" lockups (desktop header, mobile menu header) — one definition, not three. It takes two
+  separate hand-tuned bar arrays (`WAVEFORM_LG`/`WAVEFORM_SM`, the same "hand-picked, not
+  `Math.random()`'d — a real hydration mismatch otherwise" reasoning as the original array), since
+  the much narrower sidebar/mobile lockup needs a different bar *density* to read right behind
+  smaller text, not just fewer of the hero's own bars; a `heading` prop swaps the inner "sheddex"
+  between a plain `<span>` and an `<h1>`, since the hero's copy is also the page's real main
+  heading and the sidebar's own copies never were. Verified with the same nix-chromium setup,
+  zoomed in via `document.body.style.zoom` before screenshotting a locator directly (the sidebar/
+  mobile lockups render at only ~70×32px in reality — the bars are genuinely there and correctly
+  proportioned at actual size, confirmed by inspecting each bar's real `getBoundingClientRect()`
+  directly, but too small to visually read as a texture rather than noise in an un-zoomed
+  screenshot, the same way they'd be hard to make out on an actual phone/sidebar at 100% zoom
+  without looking closely) — both zoomed screenshots show the same bars-peeking-through-letterforms
+  look the hero already had. `tsc`, `eslint`, and `next build` all pass.
 - **Privacy Policy / Terms of Service** (`app/privacy/page.tsx`, `app/terms/page.tsx`,
   `components/LegalPage.tsx`) — plain prose pages, not tools (no `ToolLayout`), and plain Server
   Components (no `"use client"` anywhere in either — no interactivity needed). Linked from
@@ -1602,6 +1888,26 @@ Community bullet in the tools list above), and its first-ever file upload. Two n
   show on a profile — gated the same way the rest of it is: always visible for your own account,
   otherwise only if that profile is public (`canViewFollowGraph`) — a private profile's social
   graph stays private too, not just its tune list.
+
+**Usernames are now required for every account** — per an explicit follow-up request, not
+optional-until-you-go-public the way `profiles` was originally designed. Enforced as a follow-up
+step rather than threaded into sign-up itself, since Convex Auth's own Password/Google flows have
+no field for one: `components/UsernamePrompt.tsx`, mounted once app-wide in `app/layout.tsx`
+alongside `PracticeTimerAlert`, shows a full-screen, deliberately non-dismissable modal (no
+Escape, no backdrop click — same reasoning as that alert) to any signed-in user whose
+`api.profiles.getMine` is `null` or has `username === ""` (the same empty-string sentinel
+`setAvatar` already used for "profile row exists, no username chosen yet"). It submits through a
+new, minimal-field `claimUsername` mutation rather than reusing `upsertProfile` — the latter also
+writes `instruments`/`isPublic`, which this prompt knows nothing about and shouldn't be able to
+clobber on an existing row. The sidebar's account button (`AccountMenu.tsx`) now shows the
+signed-in user's real profile picture (`UserAvatar`, reading `api.profiles.getMine`'s `avatarUrl`)
+and `@username` instead of a generic person icon and their email — falling back to email/name only
+in the brief window before `UsernamePrompt` forces a username to exist at all. Verified against the
+real dev deployment: `claimUsername` correctly rejects an unauthenticated caller, and
+`usernameAvailable` correctly reports an empty string as unavailable. **Not verified**: the prompt
+actually appearing and blocking the rest of the app for a real freshly-signed-up or
+no-username-yet account, and the avatar/username swap rendering correctly in both sidebar footers
+— this sandbox still has no working browser.
 
 **A public profile's tune lists aren't curated — it shows everything, automatically.** The first
 version had a "which of your tunes should show" picker (`knownTuneIds`, a hand-picked subset) on

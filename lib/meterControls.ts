@@ -45,6 +45,26 @@ export function splitTenths(value: number): {
 // A beat unit has to be an actual note value (you can't have a "beat unit of 3").
 export const NOTE_VALUES: number[] = [1, 2, 4, 8, 16, 32, 64];
 
+export const NOTE_VALUE_NAMES: Record<number, string> = {
+  1: "Whole note",
+  2: "Half note",
+  4: "Quarter note",
+  8: "Eighth note",
+  16: "Sixteenth note",
+  32: "32nd note",
+  64: "64th note",
+};
+
+/** Converts a tempo expressed as "`fromNoteValue` = `bpm`" into the equivalent tempo for
+    `toNoteValue` — e.g. a quarter note at 120 BPM is the same underlying pulse as an eighth note
+    at 240 BPM (an eighth note is half as long, so twice as many fit in the same minute). Lets a
+    metronome's tempo number refer to a different note value than the meter's own beat unit —
+    `lib/clickEngine.ts`'s `ClickSettings.bpm` has no concept of note values itself, it's always
+    just "clicks per minute" for whatever the engine is currently counting as one beat. */
+export function convertTempo(bpm: number, fromNoteValue: number, toNoteValue: number): number {
+  return (bpm * toNoteValue) / fromNoteValue;
+}
+
 /** Rounds to the nearest note value, comparing on a log scale since the values are powers of two. */
 export function nearestNoteValue(n: number): number {
   const clamped = Math.min(64, Math.max(1, n));
@@ -65,6 +85,22 @@ export function defaultAccents(
   return Array.from(
     { length: beats },
     (_, i) => previous[i] ?? (i === 0 ? 2 : 1),
+  );
+}
+
+/** One accent level per *subdivision* click within a beat, flattened beat-major
+    (`beat * (subdivision - 1) + subIndex`) — the same shape/order `lib/clickEngine.ts`'s
+    `ClickSettings.subAccents` and `BeatIndicator`'s dots both use. Defaults every slot to
+    "normal" (`1`), the one level every subdivision click always played at before this existed. */
+export function defaultSubAccents(
+  beatsPerBar: number,
+  subdivision: number,
+  previous: BeatLevel[] = [],
+): BeatLevel[] {
+  const slots = Math.max(0, Math.round(subdivision) - 1);
+  return Array.from(
+    { length: beatsPerBar * slots },
+    (_, i): BeatLevel => previous[i] ?? 1,
   );
 }
 

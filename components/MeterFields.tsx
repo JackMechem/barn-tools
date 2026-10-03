@@ -6,7 +6,7 @@ import NumberField from "@/components/NumberField";
 import Select from "@/components/Select";
 import type { BeatLevel } from "@/lib/clickEngine";
 import { CLICK_SOUNDS } from "@/lib/clickEngine";
-import { MAX_BEATS, SIGNATURE_PRESETS } from "@/lib/meters";
+import { MAX_BEATS } from "@/lib/meters";
 import {
   MAX_BPM,
   MIN_BPM,
@@ -28,6 +28,13 @@ export const CIRCLE_BUTTON =
   "flex h-9 w-9 items-center justify-center rounded-full bg-background text-lg font-semibold leading-none text-foreground hover:bg-surface-hover disabled:opacity-40";
 export const CIRCLE_INPUT =
   "h-14 w-14 rounded-full bg-background text-center text-lg font-semibold tabular-nums outline-none focus:ring-2 focus:ring-accent";
+// A smaller cut of the same two, for the beats-per-bar/beat-unit pair specifically (see
+// `MeterOptions` below) — every other `SteppedField`/`BeatUnitField` caller (Polyrhythm's own
+// "Bars between modulations", a Structure section's "Bars") keeps the full size above.
+const CIRCLE_BUTTON_SM =
+  "flex h-7 w-7 items-center justify-center rounded-full bg-background text-sm font-semibold leading-none text-foreground hover:bg-surface-hover disabled:opacity-40";
+const CIRCLE_INPUT_SM =
+  "h-10 w-10 rounded-full bg-background text-center text-sm font-semibold tabular-nums outline-none focus:ring-2 focus:ring-accent";
 
 export const SOUND_OPTIONS = CLICK_SOUNDS.map((c) => ({
   value: c.id,
@@ -67,6 +74,8 @@ export function SteppedField({
   max,
   disabled,
   layout = "stack",
+  size = "md",
+  minusOnRight,
   hint,
   onChange,
 }: {
@@ -79,16 +88,22 @@ export function SteppedField({
   max: number;
   disabled?: boolean;
   layout?: "stack" | "row";
+  /** "sm" shrinks the whole control — for the beats-per-bar/beat-unit pair specifically, which
+      sits inside an already-busy panel and doesn't need to be this prominent. */
+  size?: "md" | "sm";
+  /** `layout="row"` only: puts the number first, then −, then + (instead of −, number, +). */
+  minusOnRight?: boolean;
   hint?: string;
   onChange: (value: number) => void;
 }) {
+  const small = size === "sm";
   const increase = (
     <button
       type="button"
       aria-label={`Increase ${label}`}
       onClick={() => onChange(Math.min(max, value + 1))}
       disabled={disabled || value >= max}
-      className={CIRCLE_BUTTON}
+      className={small ? CIRCLE_BUTTON_SM : CIRCLE_BUTTON}
     >
       +
     </button>
@@ -99,7 +114,7 @@ export function SteppedField({
       aria-label={`Decrease ${label}`}
       onClick={() => onChange(Math.max(min, value - 1))}
       disabled={disabled || value <= min}
-      className={CIRCLE_BUTTON}
+      className={small ? CIRCLE_BUTTON_SM : CIRCLE_BUTTON}
     >
       −
     </button>
@@ -111,18 +126,30 @@ export function SteppedField({
       min={min}
       max={max}
       onChange={onChange}
-      className={CIRCLE_INPUT}
+      className={small ? CIRCLE_INPUT_SM : CIRCLE_INPUT}
     />
   );
 
   return (
-    <div className="flex flex-col items-center gap-1.5 text-sm">
-      {showLabel && <span className="font-medium text-muted">{label}</span>}
+    <div className={`flex flex-col gap-1.5 text-sm ${small ? "items-start" : "items-center"}`}>
+      {showLabel && (
+        <span className={`font-medium text-muted ${small ? "text-xs" : ""}`}>{label}</span>
+      )}
       {layout === "row" ? (
         <div className="flex items-center gap-2">
-          {decrease}
-          {field}
-          {increase}
+          {minusOnRight ? (
+            <>
+              {field}
+              {decrease}
+              {increase}
+            </>
+          ) : (
+            <>
+              {decrease}
+              {field}
+              {increase}
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -144,6 +171,8 @@ export function BeatUnitField({
   value,
   showLabel = true,
   layout = "stack",
+  size = "md",
+  minusOnRight,
   hint,
   onChange,
 }: {
@@ -154,9 +183,14 @@ export function BeatUnitField({
   /** Mirrors `SteppedField`'s own layout option: `"stack"` (default) puts +/− above and below
       the number; `"row"` puts them on either side of it instead. */
   layout?: "stack" | "row";
+  /** Mirrors `SteppedField`'s own `size` option — "sm" shrinks the whole control. */
+  size?: "md" | "sm";
+  /** Mirrors `SteppedField`'s own `minusOnRight` option. */
+  minusOnRight?: boolean;
   hint?: string;
   onChange: (value: number) => void;
 }) {
+  const small = size === "sm";
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? String(value);
   const index = NOTE_VALUES.indexOf(value);
@@ -180,7 +214,7 @@ export function BeatUnitField({
       aria-label="Larger beat unit"
       onClick={() => step(1)}
       disabled={index >= NOTE_VALUES.length - 1}
-      className={CIRCLE_BUTTON}
+      className={small ? CIRCLE_BUTTON_SM : CIRCLE_BUTTON}
     >
       +
     </button>
@@ -191,7 +225,7 @@ export function BeatUnitField({
       aria-label="Smaller beat unit"
       onClick={() => step(-1)}
       disabled={index <= 0}
-      className={CIRCLE_BUTTON}
+      className={small ? CIRCLE_BUTTON_SM : CIRCLE_BUTTON}
     >
       −
     </button>
@@ -215,18 +249,30 @@ export function BeatUnitField({
           step(-1);
         }
       }}
-      className={CIRCLE_INPUT}
+      className={small ? CIRCLE_INPUT_SM : CIRCLE_INPUT}
     />
   );
 
   return (
-    <div className="flex flex-col items-center gap-1.5 text-sm">
-      {showLabel && <span className="font-medium text-muted">Beat unit</span>}
+    <div className={`flex flex-col gap-1.5 text-sm ${small ? "items-start" : "items-center"}`}>
+      {showLabel && (
+        <span className={`font-medium text-muted ${small ? "text-xs" : ""}`}>Beat unit</span>
+      )}
       {layout === "row" ? (
         <div className="flex items-center gap-2">
-          {decrease}
-          {field}
-          {increase}
+          {minusOnRight ? (
+            <>
+              {field}
+              {decrease}
+              {increase}
+            </>
+          ) : (
+            <>
+              {decrease}
+              {field}
+              {increase}
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -338,6 +384,41 @@ export function SubdivisionIcon({ count }: { count: number }) {
   );
 }
 
+/** A single engraved note of the given note value — hollow for whole/half, filled with a stem for
+    quarter and shorter, plus one flag per halving below a quarter (eighth = 1 flag, sixteenth = 2,
+    ...). Same notehead/stem proportions as `SubdivisionIcon`'s own beamed notes, just for one note
+    standing alone — used as each option's icon in Metronome.tsx's "tempo note value" picker. */
+export function NoteValueIcon({ value, className }: { value: number; className?: string }) {
+  const filled = value >= 4;
+  const hasStem = value >= 2;
+  const flagCount = value > 4 ? Math.round(Math.log2(value)) - 2 : 0;
+  const stemX = 6.4;
+  const stemTop = 9;
+  const noteheadCy = 23;
+
+  return (
+    <svg aria-hidden viewBox="0 0 12 28" className={className ?? "h-7 w-3"} fill="currentColor">
+      <ellipse
+        cx={4}
+        cy={noteheadCy}
+        rx={3.2}
+        ry={2.4}
+        transform={`rotate(-20 4 ${noteheadCy})`}
+        fill={filled ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth={filled ? 0 : 1.1}
+      />
+      {hasStem && <rect x={stemX} y={stemTop} width={1.2} height={noteheadCy - stemTop} />}
+      {Array.from({ length: flagCount }, (_, i) => (
+        <path
+          key={i}
+          d={`M${stemX + 1.2} ${stemTop + i * 4.5} q5 1.5 4.5 7 q-2.5 -2.5 -4.5 -1.5 z`}
+        />
+      ))}
+    </svg>
+  );
+}
+
 /** The big BPM number, its +/- steppers, the log-scaled quick-adjust slider and tap tempo. */
 export function TempoHero({
   bpm,
@@ -347,6 +428,7 @@ export function TempoHero({
   onTap,
   locked = false,
   precise,
+  aboveNumber,
 }: {
   bpm: number;
   setBpm: (bpm: number) => void;
@@ -360,10 +442,19 @@ export function TempoHero({
       here — e.g. mid-run, between modulations. Only used while `locked`; a nonzero tenths digit
       is shown right after the whole number, in smaller, dimmer text. */
   precise?: number;
+  /** Rendered directly above the big number itself (e.g. Metronome's "tempo note value" picker)
+      — optional, so every other caller is unaffected. */
+  aboveNumber?: React.ReactNode;
 }) {
   const { whole, tenths } = splitTenths(precise ?? bpm);
   return (
     <div className="flex w-full flex-col items-center gap-4">
+      {/* A sibling row above the −/number/+ row, not nested inside it — so the steppers below
+          stay centered against *just* the number (their own row's only other content), never
+          shifted by however tall this happens to be. Both rows share the same horizontal center
+          either way (this whole column is itself `items-center`), so it still reads as "on top
+          of the big number". */}
+      {aboveNumber}
       <div className="flex items-center gap-4">
         {!locked && (
           <StepButton label="Decrease tempo" onClick={() => setBpm(bpm - 1)}>
@@ -429,15 +520,15 @@ export function TempoHero({
   );
 }
 
-/** The presets + beats/unit steppers + accent grouping + subdivision picker, as one group. */
+/** The beats/unit steppers + accent grouping + subdivision picker, as one group. Used to also
+    lead with a row of common-signature preset buttons; removed per a direct follow-up request
+    ("get rid of the presets") — the steppers below are the only way to set the meter now. */
 export function MeterOptions({
   beatsPerBar,
   beatUnit,
   accents,
   subdivision,
-  disabled,
   onChangeBeats,
-  onApplySignature,
   onSetBeatUnit,
   onSetSubdivision,
   onApplyGroups,
@@ -446,9 +537,7 @@ export function MeterOptions({
   beatUnit: number;
   accents: BeatLevel[];
   subdivision: number;
-  disabled?: boolean;
   onChangeBeats: (n: number) => void;
-  onApplySignature: (beats: number, unit: number, groups: number[]) => void;
   onSetBeatUnit: (unit: number) => void;
   onSetSubdivision: (n: number) => void;
   onApplyGroups: (groups: number[]) => void;
@@ -457,40 +546,24 @@ export function MeterOptions({
 
   return (
     <>
-      <div className="flex flex-wrap gap-2">
-        {SIGNATURE_PRESETS.map(({ beats, unit, groups }) => (
-          <button
-            key={`${beats}/${unit}`}
-            type="button"
-            onClick={() => onApplySignature(beats, unit, groups)}
-            disabled={disabled}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium tabular-nums transition-colors disabled:opacity-50 ${
-              beats === beatsPerBar && unit === beatUnit
-                ? "bg-accent text-accent-foreground"
-                : "bg-background hover:bg-surface-hover"
-            }`}
-          >
-            {beats}/{unit}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col items-start gap-1">
+        <span className="text-sm font-medium text-muted">Time signature</span>
         <SteppedField
           label="Beats per bar"
-          showLabel={false}
           value={beatsPerBar}
           min={1}
           max={MAX_BEATS}
           layout="row"
+          size="sm"
+          minusOnRight
           onChange={onChangeBeats}
           hint="How many beats make up one bar."
         />
-        <div className="border-t border-surface-hover" />
         <BeatUnitField
           value={beatUnit}
-          showLabel={false}
           layout="row"
+          size="sm"
+          minusOnRight
           onChange={onSetBeatUnit}
           hint="Which note value counts as one beat, e.g. 4 for quarter notes, 8 for eighths."
         />

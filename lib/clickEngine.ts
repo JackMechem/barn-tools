@@ -74,6 +74,11 @@ export type ClickSettings = {
   beatsPerBar: number;
   accents: BeatLevel[];
   subdivision: number;
+  /** One accent level per *subdivision* click within a beat (not the main beat itself, which
+      `accents` already covers) — flattened beat-major, `beat * (subdivision - 1) + subIndex`,
+      the same order `BeatIndicator`'s dots are drawn in. Empty/short is fine (missing entries
+      default to "normal", same as every subdivision click always played before this existed). */
+  subAccents: BeatLevel[];
   volume: number;
   soundId: string;
 };
@@ -114,8 +119,10 @@ export type ClickTrack = {
    * rather than reacting to `onBeat` afterward, which is too late for that gap to reflect it.
    */
   getSettings: (beat: number, sub: number) => ClickSettings;
-  /** Fires (roughly) when each main beat of this track is heard. */
-  onBeat: (beat: number) => void;
+  /** Fires (roughly) when each tick of this track is heard — not just the main beat (`sub === 0`)
+      but every subdivision click in between too, so a caller that shows subdivision dots
+      (`BeatIndicator`'s `currentSub`) can highlight exactly which one just played. */
+  onBeat: (beat: number, sub: number) => void;
 };
 
 /**
@@ -144,6 +151,7 @@ export function startClickEngine(tracks: ClickTrack[]): ClickEngine {
         const sound =
           CLICK_SOUNDS.find((c) => c.id === s.soundId) ?? CLICK_SOUNDS[0];
         const vol = s.volume * sound.gain;
+        const subSlots = Math.max(0, s.subdivision - 1);
 
         if (st.sub === 0) {
           const level = s.accents[st.beat] ?? 1;
@@ -166,23 +174,41 @@ export function startClickEngine(tracks: ClickTrack[]): ClickEngine {
               sound.length,
             );
           }
-          const shownBeat = st.beat;
-          const delayMs = Math.max(0, (st.nextTime - ctx.currentTime) * 1000);
-          const t = setTimeout(() => {
-            timeouts.delete(t);
-            onBeat(shownBeat);
-          }, delayMs);
-          timeouts.add(t);
-        } else {
-          scheduleClick(
-            ctx,
-            st.nextTime,
-            sound.wave,
-            sound.subFreq,
-            0.25 * vol,
-            sound.length * 0.6,
-          );
+        } else if (subSlots > 0) {
+          const subIndex = st.beat * subSlots + (st.sub - 1);
+          const level = s.subAccents[subIndex] ?? 1;
+          if (level === 2) {
+            // Louder/higher-pitched than a normal subdivision click (same `normalFreq` a normal
+            // main beat uses), but quieter than one — an accented "&" should stand out from the
+            // other subdivision clicks without being confused for an actual downbeat.
+            scheduleClick(
+              ctx,
+              st.nextTime,
+              sound.wave,
+              sound.normalFreq,
+              0.4 * vol,
+              sound.length * 0.8,
+            );
+          } else if (level === 1) {
+            scheduleClick(
+              ctx,
+              st.nextTime,
+              sound.wave,
+              sound.subFreq,
+              0.25 * vol,
+              sound.length * 0.6,
+            );
+          }
         }
+
+        const shownBeat = st.beat;
+        const shownSub = st.sub;
+        const delayMs = Math.max(0, (st.nextTime - ctx.currentTime) * 1000);
+        const t = setTimeout(() => {
+          timeouts.delete(t);
+          onBeat(shownBeat, shownSub);
+        }, delayMs);
+        timeouts.add(t);
 
         st.nextTime += 60 / s.bpm / s.subdivision;
         st.sub++;

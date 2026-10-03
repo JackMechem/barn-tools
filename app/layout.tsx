@@ -8,6 +8,7 @@ import ConvexClientProvider from "@/components/ConvexClientProvider";
 import PracticeTimerAlert from "@/components/PracticeTimerAlert";
 import PracticeTimerWidget from "@/components/PracticeTimerWidget";
 import Sidebar from "@/components/Sidebar";
+import UsernamePrompt from "@/components/UsernamePrompt";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -54,6 +55,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <CommandPalette />
             <PracticeTimerWidget mobile />
             <PracticeTimerAlert />
+            <UsernamePrompt />
             <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-xl lg:border lg:border-surface-hover">
               {children}
             </div>

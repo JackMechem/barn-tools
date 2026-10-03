@@ -90,6 +90,51 @@ export const upsertProfile = mutation({
   },
 });
 
+/** Sets just the caller's username — the minimal-field counterpart to `upsertProfile`, used by the
+    mandatory "pick a username" prompt (`components/UsernamePrompt.tsx`) shown to any signed-in
+    user who doesn't have one yet (usernames are required, but Convex Auth's own sign-up/Google
+    flow has no field for one, so this is enforced as a follow-up step rather than part of sign-up
+    itself). Creates the profile row (private, no instruments) if none exists yet, or patches just
+    the username onto an existing one — never touches `instruments`/`isPublic` on a row that
+    already exists (e.g. from `setAvatar` running first), so claiming a username here can't
+    accidentally undo profile settings already saved elsewhere. Re-validates/re-checks uniqueness
+    the same way `upsertProfile` does — this is a second entry point to the same `username` field,
+    not a second set of rules for it. */
+export const claimUsername = mutation({
+  args: { username: v.string() },
+  handler: async (ctx, { username }) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not signed in");
+    const normalized = normalizeUsername(username);
+    const error = usernameError(normalized);
+    if (error) throw new Error(error);
+
+    const existingByUsername = await ctx.db
+      .query("profiles")
+      .withIndex("by_username", (q) => q.eq("username", normalized))
+      .unique();
+    if (existingByUsername && existingByUsername.userId !== userId) {
+      throw new Error("That username is already taken.");
+    }
+
+    const mine = await ctx.db
+      .query("profiles")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .unique();
+    if (mine) {
+      await ctx.db.patch(mine._id, { username: normalized, updatedAt: Date.now() });
+    } else {
+      await ctx.db.insert("profiles", {
+        userId,
+        username: normalized,
+        instruments: [],
+        isPublic: false,
+        updatedAt: Date.now(),
+      });
+    }
+  },
+});
+
 /** Step 1 of the avatar upload flow: a one-time URL the browser uploads the resized image file
     to directly (standard Convex file-upload pattern), returning a `storageId` once that succeeds
     — see `setAvatar` for step 2, which actually attaches that id to the profile. */
