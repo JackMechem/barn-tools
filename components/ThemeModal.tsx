@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import Select from "@/components/Select";
+import ThemeSearchModal from "@/components/ThemeSearchModal";
+import { SearchIcon } from "@/components/tools";
 import {
   getServerThemeState,
   getThemeState,
@@ -15,6 +17,7 @@ import {
 } from "@/lib/theme";
 import { FONTS } from "@/lib/fonts";
 import {
+  ALL_PRESETS,
   CUSTOM_THEME_ID,
   PRESETS,
   THEME_FIELDS,
@@ -24,7 +27,7 @@ import {
   isValidHex,
 } from "@/lib/themes";
 
-function Swatch({ colors }: { colors: ThemeColors }) {
+export function Swatch({ colors }: { colors: ThemeColors }) {
   return (
     <div
       className="flex h-14 w-full flex-col justify-between rounded-lg p-2 ring-1 ring-black/10"
@@ -90,6 +93,7 @@ export default function ThemeModal({ onClose }: { onClose: () => void }) {
   const state = useSyncExternalStore(subscribeTheme, getThemeState, getServerThemeState);
   const isCustom = state.id === CUSTOM_THEME_ID;
   const colors = resolveColors(state);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -151,6 +155,21 @@ export default function ThemeModal({ onClose }: { onClose: () => void }) {
             >
               <Swatch colors={state.custom ?? colors} />
               <span className="px-1">Custom</span>
+            </button>
+            {/* Not a preset itself — opens `ThemeSearchModal`, a `/`-search-style overlay over the
+                rest of `ALL_PRESETS` (this grid's own small set plus a much longer tail modeled on
+                terminal/editor color schemes), so this grid can stay the same quick, uncluttered
+                pick list it's always been. */}
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              className="flex flex-col gap-2 rounded-xl bg-background p-2 text-left text-sm font-medium transition-shadow hover:ring-2 hover:ring-surface-hover"
+            >
+              <div className="flex h-14 w-full items-center justify-center gap-1.5 rounded-lg text-muted ring-1 ring-black/10">
+                <SearchIcon className="h-4 w-4" />
+                <span className="text-xs">{ALL_PRESETS.length} themes</span>
+              </div>
+              <span className="px-1">See all</span>
             </button>
           </div>
 
@@ -215,6 +234,12 @@ export default function ThemeModal({ onClose }: { onClose: () => void }) {
             </section>
           )}
         </div>
+        {/* A child of this inner panel (which already stops click propagation), not a sibling of
+            it — `ThemeSearchModal` portals to `document.body`, and React bubbles portal events
+            through the *React* tree regardless of where they land in the DOM, so nesting it here
+            is what keeps a click inside it from bubbling up to the outer backdrop's own
+            `onClick={onClose}` and closing this whole modal underneath it. */}
+        {searchOpen && <ThemeSearchModal onClose={() => setSearchOpen(false)} />}
       </div>
     </div>
   );

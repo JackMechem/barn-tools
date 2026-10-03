@@ -144,7 +144,7 @@ export default function PracticeTimerWidget({
         title={`${state.alarming ? "Time's up — " : ""}${state.current.title}${
           state.next ? ` — next: ${state.next.title}` : ""
         }`}
-        className={`flex items-center justify-center rounded-lg py-2 transition-colors hover:bg-surface-hover ${
+        className={`flex items-center justify-center rounded-xl py-2 transition-colors hover:bg-surface-hover ${
           state.alarming ? "animate-pulse text-danger" : "text-accent"
         }`}
       >
@@ -154,7 +154,7 @@ export default function PracticeTimerWidget({
   }
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg bg-background px-3 py-2 text-xs">
+    <div className="flex flex-col gap-1.5 rounded-xl bg-background px-3 py-2 text-xs">
       <Link
         href="/practice-timer"
         className="flex items-center gap-2 font-medium text-foreground transition-colors hover:text-accent"

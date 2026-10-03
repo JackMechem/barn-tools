@@ -72,8 +72,18 @@
   }
 }
 
+/* `background: var(--surface)`, not `--background` — the site background (visible in the thin
+   gap around the tool card, via `AppShell.tsx`'s own `lg:m-2` margin) is meant to match the
+   sidebar's own `bg-surface`, so the sidebar blends into the page instead of reading as a
+   separate panel. The tool card itself still gets the (different, intentional) `--background`
+   tone directly from `AppShell.tsx`'s own `bg-background` class. This is a plain, unlayered CSS
+   rule — Tailwind v4's `@import "tailwindcss"` above declares its own utility classes inside a
+   cascade layer, and per the CSS spec, *any* unlayered rule beats *every* layered one regardless
+   of specificity — so this rule is also why `<body>`'s own `bg-surface` class in `app/layout.tsx`
+   had no visible effect before this fix; that class is harmless but now redundant, left in place
+   rather than removed since there's no actual reason it needs to come out. */
 body {
-  background: var(--background);
+  background: var(--surface);
   color: var(--foreground);
   font-family: var(--app-font, var(--font-sans)), Arial, Helvetica, sans-serif;
 }

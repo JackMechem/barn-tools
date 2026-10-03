@@ -455,6 +455,17 @@ export const CATEGORIES = [
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 
+/** One icon per category, shown next to its own collapsible header in the sidebar
+    (`components/Sidebar.tsx`'s `NavItems`) — a decorative, category-level choice, separate from
+    (and not required to match) whichever icon a tool inside it happens to use for itself. */
+export const CATEGORY_ICONS: Record<Category, (props: { className?: string }) => React.JSX.Element> = {
+  Community: UsersIcon,
+  "Timing & Tuning": MetronomeIcon,
+  "Ear Training": EarIcon,
+  Practice: BookIcon,
+  Audio: WaveIcon,
+};
+
 export const NAV_LINKS = [
   {
     href: "/jam-practice",

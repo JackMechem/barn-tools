@@ -60,7 +60,7 @@ function DockCard({
   const link = NAV_LINKS.find((l) => l.href === href);
   const Icon = link?.icon;
   return (
-    <div className="relative flex flex-col gap-2 rounded-xl bg-surface p-3 shadow-lg ring-1 ring-foreground/10">
+    <div className="relative flex flex-col gap-2 rounded-2xl bg-surface p-3 shadow-lg">
       {/* `pr-6` reserves room for the close button only on this row (its text could otherwise
           run under it) — kept off the card's own padding so the preview row below stays
           symmetric and `justify-center` actually centers it in the card, not in a box already
@@ -178,7 +178,7 @@ export default function BackgroundToolDock() {
 
   return (
     <div
-      style={{ left: sidebarWidth + 12 }}
+      style={{ left: sidebarWidth + 16 }}
       className="fixed bottom-4 z-30 flex w-56 flex-col-reverse gap-2"
     >
       <MetronomeCard hidden={pathname === "/metronome"} />

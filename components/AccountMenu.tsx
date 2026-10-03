@@ -32,7 +32,7 @@ function SignOutIcon({ className }: { className?: string }) {
 /** Same button shape as Sidebar's ThemeButton (collapsed/large props, identical styling) so this
     drops into either sidebar footer without special-casing. */
 function buttonClass(collapsed?: boolean, large?: boolean) {
-  return `flex w-full items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} px-3 font-medium text-muted transition-colors hover:bg-surface-hover hover:text-foreground ${
+  return `flex w-full items-center gap-3 ${large ? "rounded-2xl" : "rounded-xl"} px-3 font-medium text-muted transition-colors hover:bg-surface-hover hover:text-foreground ${
     large ? "py-3 text-base" : "py-2 text-sm"
   } ${collapsed ? "justify-center" : ""}`;
 }
@@ -326,11 +326,20 @@ export default function AccountMenu({
   if (isAuthenticated) {
     // Until a username is actually set (a brief window — `UsernamePrompt` forces one right after
     // sign-up/sign-in), fall back to email/name, the same label this button always showed.
-    const label = profile?.username ? `@${profile.username}` : (user?.email ?? user?.name ?? "Account");
+    const username = profile?.username ? `@${profile.username}` : null;
+    const label = username ?? (user?.email ?? user?.name ?? "Account");
+    // Once there's a real username, the email (if any) shows as a second, smaller line under it
+    // — there's nothing to show twice when `label` already *is* the email (no username yet).
+    const email = username && user?.email ? user.email : null;
 
     if (collapsed) {
       return (
-        <Link href="/account" onClick={onNavigate} title={label} className={buttonClass(true, large)}>
+        <Link
+          href="/account"
+          onClick={onNavigate}
+          title={email ? `${label} — ${email}` : label}
+          className={buttonClass(true, large)}
+        >
           <UserAvatar url={profile?.avatarUrl ?? null} size="sm" />
         </Link>
       );
@@ -349,7 +358,12 @@ export default function AccountMenu({
           className={`${buttonClass(false, large)} ${large ? "pr-12" : "pr-10"}`}
         >
           <UserAvatar url={profile?.avatarUrl ?? null} size="sm" />
-          <span className="truncate">{label}</span>
+          <span className="flex min-w-0 flex-col items-start">
+            <span className="truncate">{label}</span>
+            {email && (
+              <span className="truncate text-xs font-normal text-muted">{email}</span>
+            )}
+          </span>
         </Link>
         <Flyout
           icon={DotsIcon}

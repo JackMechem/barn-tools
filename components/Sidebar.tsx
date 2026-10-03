@@ -10,6 +10,7 @@ import PracticeTimerWidget from "@/components/PracticeTimerWidget";
 import ThemeModal from "@/components/ThemeModal";
 import Wordmark from "@/components/Wordmark";
 import {
+  CATEGORY_ICONS,
   NAV_LINKS,
   SearchIcon,
   StarIcon,
@@ -181,7 +182,7 @@ function SearchBox({
         type="button"
         onClick={() => window.dispatchEvent(new Event(OPEN_PALETTE_EVENT))}
         aria-label="Search tools"
-        className="mb-3 flex w-full items-center gap-2 rounded-lg bg-background px-3 py-2 text-left text-sm text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+        className="mb-3 flex w-full items-center gap-2 rounded-full bg-background px-3 py-2 text-left text-sm text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
       >
         <SearchIcon className="h-4 w-4 shrink-0" />
         <span className="truncate">Press / to search</span>
@@ -191,7 +192,7 @@ function SearchBox({
 
   return (
     <label
-      className={`mb-3 flex items-center gap-2 ${large ? "rounded-xl" : "rounded-lg"} bg-background px-3 text-muted focus-within:ring-2 focus-within:ring-accent ${
+      className={`mb-3 flex items-center gap-2 rounded-full bg-background px-3 text-muted focus-within:ring-2 focus-within:ring-accent ${
         large ? "py-2.5 text-base" : "py-2 text-sm"
       }`}
     >
@@ -210,6 +211,87 @@ function SearchBox({
 }
 
 type NavLink = (typeof NAV_LINKS)[number];
+
+/** Shared by Favorites and every real category in `NavItems` below — a collapsible section with
+    its own header (icon + title + chevron) and, while expanded, a subtle rounded background
+    behind the whole block. `accent` is the one visual difference Favorites gets: a translucent
+    *accent* tint instead of the plain `surface-hover` tint every other category uses, so it still
+    reads as a distinct, special section rather than just another category. A module-level
+    component (not a function defined inside `NavItems`'s own render, which the React Compiler
+    correctly flags — a new component identity every render resets state), so everything it needs
+    from `NavItems` is passed in explicitly instead of closed over. */
+function CategoryBlock({
+  title,
+  icon: Icon,
+  items,
+  collapsed,
+  large,
+  searching,
+  isCollapsed,
+  onToggleCollapse,
+  renderLink,
+  accent,
+}: {
+  title: string;
+  icon: (props: { className?: string }) => React.JSX.Element;
+  items: NavLink[];
+  collapsed?: boolean;
+  large?: boolean;
+  searching: boolean;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  renderLink: (link: NavLink) => React.ReactNode;
+  accent?: boolean;
+}) {
+  // A genuinely *expanded* section (not the icon-only sidebar, where everything always shows flat
+  // with no header at all) gets its rounded backing — otherwise it'd blend into the plain sidebar
+  // background the way a collapsed section does.
+  const expanded = !collapsed && !isCollapsed;
+  return (
+    <div
+      className={`flex flex-col gap-1 rounded-xl pb-2 pt-1.5 transition-colors ${
+        expanded ? (accent ? "bg-accent/20" : "bg-surface-hover/60") : ""
+      }`}
+    >
+      {!collapsed &&
+        (searching ? (
+          <p
+            className={`flex items-center gap-2 px-4 pb-1.5 pt-2 font-semibold text-muted/70 ${
+              large ? "text-base" : "text-sm"
+            }`}
+          >
+            <Icon className={large ? "h-6 w-6 shrink-0" : "h-5 w-5 shrink-0"} />
+            {title}
+          </p>
+        ) : (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-expanded={!isCollapsed}
+            className="flex w-full items-center justify-between gap-2 rounded-lg px-4 pb-1.5 pt-2 font-semibold text-muted/70 transition-colors hover:text-foreground"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <Icon className={large ? "h-6 w-6 shrink-0" : "h-5 w-5 shrink-0"} />
+              <span className={large ? "text-base" : "text-sm"}>{title}</span>
+            </span>
+            <ChevronDownIcon
+              className={`h-3 w-3 shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
+            />
+          </button>
+        ))}
+      {!isCollapsed &&
+        (collapsed ? (
+          items.map(renderLink)
+        ) : (
+          // Indented, with a vertical rule down the left, so a section's own sub-options read as
+          // nested under its title rather than sitting flush with it.
+          <div className="ml-4 mr-2 flex flex-col gap-1 border-l border-surface-hover pl-2">
+            {items.map(renderLink)}
+          </div>
+        ))}
+    </div>
+  );
+}
 
 function NavItems({
   collapsed,
@@ -279,12 +361,12 @@ function NavItems({
         href={href}
         onClick={onNavigate}
         title={collapsed ? label : undefined}
-        className={`flex min-w-0 items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} border px-3 font-medium transition-colors ${
+        className={`flex min-w-0 items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} px-3 font-medium transition-colors ${
           large ? "py-3 text-base" : "py-2 text-sm"
         } ${collapsed ? "justify-center" : "w-full"} ${showsStar ? (large ? "pr-14" : "pr-11") : ""} ${
           active
-            ? "border-accent/30 bg-accent/10 text-accent"
-            : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground"
+            ? "bg-accent/10 text-accent"
+            : "text-muted hover:bg-surface-hover hover:text-foreground"
         }`}
       >
         <Icon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
@@ -310,7 +392,7 @@ function NavItems({
           aria-label={isFavorite ? `Remove ${label} from favorites` : `Add ${label} to favorites`}
           aria-pressed={isFavorite}
           title={isFavorite ? "Remove from favorites" : "Add to favorites"}
-          className={`absolute right-1 top-1/2 z-10 flex -translate-y-1/2 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-surface-hover ${
+          className={`absolute right-1 top-1/2 z-10 flex -translate-y-1/2 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-hover ${
             large ? "h-11 w-11" : "h-9 w-9"
           } ${isFavorite ? "text-accent" : "text-muted hover:text-foreground"} ${
             // An already-favorited star always stays visible (so you can see what's starred at a
@@ -328,62 +410,51 @@ function NavItems({
     );
   }
 
+  // Collapsing is a `!collapsed`-only (not icon-mode) concept, and a search in progress always
+  // forces every section open — a collapsed one hiding its own search matches would just look
+  // like the search was broken.
+  function isSectionCollapsed(key: string) {
+    return !collapsed && !searching && (collapsedCategories[key] ?? false);
+  }
+
   return (
     <nav className="flex overflow-y-auto h-full flex-col gap-3">
       {groups.length === 0 && !communityItem && (
         <p className={`px-3 text-muted ${large ? "text-base" : "text-sm"}`}>No tools found</p>
       )}
       {communityItem && (
-        <div className="flex flex-col gap-1">{renderLink(communityItem)}</div>
+        <div className="flex flex-col gap-1 pb-2">{renderLink(communityItem)}</div>
       )}
       {favoriteItems.length > 0 && (
-        <div className="flex flex-col gap-1">
-          {!collapsed && (
-            <p
-              className={`flex items-center gap-1 px-3 pb-0.5 font-semibold text-muted/70 ${
-                large ? "text-xs" : "text-[0.65rem]"
-              }`}
-            >
-              <StarIcon className={large ? "h-3 w-3" : "h-2.5 w-2.5"} filled />
-              Favorites
-            </p>
-          )}
-          {favoriteItems.map(renderLink)}
-        </div>
+        <CategoryBlock
+          title="Favorites"
+          icon={(props) => <StarIcon {...props} filled />}
+          items={favoriteItems}
+          collapsed={collapsed}
+          large={large}
+          searching={searching}
+          isCollapsed={isSectionCollapsed("Favorites")}
+          onToggleCollapse={() =>
+            setCategoryCollapsed("Favorites", !isSectionCollapsed("Favorites"))
+          }
+          renderLink={renderLink}
+          accent
+        />
       )}
-      {groups.map(({ category, items }) => {
-        // Collapsing is a `!collapsed`-only (not icon-mode) concept, and a search in progress
-        // always forces every category open — a collapsed category hiding its own search matches
-        // would just look like the search was broken.
-        const isCollapsed = !collapsed && !searching && (collapsedCategories[category] ?? false);
-        return (
-          <div key={category} className="flex flex-col gap-1">
-            {!collapsed &&
-              (searching ? (
-                <p
-                  className={`px-3 pb-0.5 font-semibold text-muted/70 ${
-                    large ? "text-xs" : "text-[0.65rem]"
-                  }`}
-                >
-                  {category}
-                </p>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setCategoryCollapsed(category, !isCollapsed)}
-                  aria-expanded={!isCollapsed}
-                  className="flex w-full items-center justify-between rounded-lg px-3 pb-0.5 font-semibold text-muted/70 transition-colors hover:text-foreground"
-                >
-                  <span className={large ? "text-xs" : "text-[0.65rem]"}>{category}</span>
-                  <ChevronDownIcon
-                    className={`h-3 w-3 shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
-                  />
-                </button>
-              ))}
-            {!isCollapsed && items.map(renderLink)}
-          </div>
-        );
-      })}
+      {groups.map(({ category, items }) => (
+        <CategoryBlock
+          key={category}
+          title={category}
+          icon={CATEGORY_ICONS[category]}
+          items={items}
+          collapsed={collapsed}
+          large={large}
+          searching={searching}
+          isCollapsed={isSectionCollapsed(category)}
+          onToggleCollapse={() => setCategoryCollapsed(category, !isSectionCollapsed(category))}
+          renderLink={renderLink}
+        />
+      ))}
     </nav>
   );
 }
@@ -522,7 +593,7 @@ export default function Sidebar() {
           <div className="min-h-0 flex-1 overflow-y-auto pb-2">
             <NavItems large query={query} onNavigate={() => setMobileOpen(false)} />
           </div>
-          <div className="mt-1 flex flex-col gap-1 p-1 bg-background/50 rounded-xl">
+          <div className="mt-1 flex flex-col gap-1 p-1 bg-background rounded-2xl">
             <PracticeTimerWidget />
             <AccountMenu large onNavigate={() => setMobileOpen(false)} />
           </div>
@@ -595,7 +666,7 @@ export default function Sidebar() {
             onClick={() => window.dispatchEvent(new Event(OPEN_PALETTE_EVENT))}
             aria-label="Search tools"
             title="Search tools"
-            className="mb-3 flex items-center justify-center rounded-lg px-3 py-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+            className="mb-3 flex items-center justify-center rounded-full px-3 py-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
           >
             <SearchIcon className="h-4 w-4" />
           </button>
@@ -603,7 +674,7 @@ export default function Sidebar() {
           <SearchBox query={query} onChange={setQuery} />
         )}
         <NavItems collapsed={collapsed} query={query} />
-        <div className="mt-1 flex flex-col gap-1 p-1 bg-background/50 rounded-lg">
+        <div className="mt-1 flex flex-col gap-1 p-1 bg-background rounded-2xl">
           <PracticeTimerWidget collapsed={collapsed} />
           <AccountMenu collapsed={collapsed} />
         </div>

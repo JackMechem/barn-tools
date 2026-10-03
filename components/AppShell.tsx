@@ -23,14 +23,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!enabled || !isDesktop) {
     return (
-      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-xl lg:border lg:border-surface-hover">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-3xl">
         {children}
       </div>
     );
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-xl lg:border lg:border-surface-hover">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background lg:my-2 lg:ml-2 lg:mr-2 lg:rounded-3xl">
       <TilingLayout />
     </div>
   );
