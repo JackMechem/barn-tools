@@ -1,27 +1,39 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { OPEN_PALETTE_EVENT } from "@/components/CommandPalette";
 import { svgProps } from "@/components/tools";
-import { TILEABLE_LINKS, TOOL_COMPONENTS } from "@/lib/toolRegistry";
+import { TOOL_COMPONENTS } from "@/lib/toolRegistry";
 import {
+  type PaneEdge,
   type PaneSplit,
   type PaneTree,
   collectLeaves,
   createLeaf,
   removePane,
   resizeSplit,
-  splitLeaf,
+  updateLeafHref,
 } from "@/lib/tilingLayout";
-import { updateTilingState, useTilingState } from "@/lib/useTilingLayout";
-import { filterLinks } from "@/components/tools";
+import {
+  requestSplit as setPendingSplit,
+  syncAddressBar,
+  updateTilingState,
+  useTilingState,
+} from "@/lib/useTilingLayout";
 
-function SplitRightIcon({ className }: { className?: string }) {
+const EDGES: PaneEdge[] = ["up", "right", "down", "left"];
+
+function EdgeIcon({ edge, className }: { edge: PaneEdge; className?: string }) {
+  const paths: Record<PaneEdge, string> = {
+    up: "M12 19V5M12 5l-5 5M12 5l5 5",
+    down: "M12 5v14M12 19l-5-5M12 19l5-5",
+    left: "M19 12H5M5 12l5-5M5 12l5 5",
+    right: "M5 12h14M19 12l-5-5M19 12l-5 5",
+  };
   return (
     <svg {...svgProps(className)}>
-      <rect x="3" y="4" width="7" height="16" rx="1.5" />
-      <rect x="14" y="4" width="7" height="16" rx="1.5" strokeDasharray="3 2" />
+      <path d={paths[edge]} />
     </svg>
   );
 }
@@ -34,192 +46,87 @@ function CloseIcon({ className }: { className?: string }) {
   );
 }
 
-function SearchIcon({ className }: { className?: string }) {
-  return (
-    <svg {...svgProps(className)}>
-      <circle cx="11" cy="11" r="7" />
-      <path d="M21 21l-4.3-4.3" />
-    </svg>
-  );
-}
+const EDGE_BUTTON_POSITION: Record<PaneEdge, string> = {
+  up: "left-1/2 top-2 -translate-x-1/2",
+  down: "left-1/2 bottom-2 -translate-x-1/2",
+  left: "left-2 top-1/2 -translate-y-1/2",
+  right: "right-2 top-1/2 -translate-y-1/2",
+};
 
-/** A small popover (anchored under the split button, portaled to `document.body`, positioned the
-    same `getBoundingClientRect`-driven way `components/Select.tsx` already does) for picking
-    which tool to open in a new pane and which direction to tile it. Reuses the exact same
-    `filterLinks` search the `/` command palette uses, narrowed to `TILEABLE_LINKS`. */
-function SplitPicker({
-  anchorRef,
-  onClose,
-  onPick,
-}: {
-  anchorRef: React.RefObject<HTMLButtonElement | null>;
-  onClose: () => void;
-  onPick: (href: string, direction: "row" | "col") => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
+/** One pane: the actual tool (mounted via `TOOL_COMPONENTS`), a small split button centered on
+    each of its four edges (hover-revealed — `opacity-0 group-hover:opacity-100`, the same
+    reveal-on-hover convention `Sidebar.tsx`'s own favorite star already uses — so they don't
+    clutter the tool's own UI the rest of the time), and an always-visible close button in the
+    corner once there's more than one pane to collapse back into. Clicking an edge button doesn't
+    open any UI of its own — per a direct follow-up request, it opens the exact same `/` command
+    palette every other search in this app uses (`onRequestSplit`, implemented by `TilingLayout`
+    below), rather than a bespoke mini-popover.
 
-  useEffect(() => {
-    function place() {
-      const rect = anchorRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const width = 288;
-      // Right-align under the button (it sits at a pane's own top-right corner), clamped so it
-      // never runs off the left edge of the viewport.
-      const left = Math.max(8, rect.right - width);
-      setPos({ left, top: rect.bottom + 6, width });
-    }
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-
-    function onPointerDown(e: PointerEvent) {
-      const target = e.target as Node;
-      if (popoverRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
-      onClose();
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [anchorRef, onClose]);
-
-  const results = filterLinks(query).filter((link) => TILEABLE_LINKS.includes(link));
-
-  if (!pos) return null;
-
-  return createPortal(
-    <div
-      ref={popoverRef}
-      style={{ position: "fixed", left: pos.left, top: pos.top, width: pos.width }}
-      className="z-[100] flex max-h-96 flex-col gap-2 rounded-xl bg-surface p-2 shadow-lg ring-1 ring-foreground/10"
-    >
-      <label className="flex items-center gap-2 rounded-lg bg-background px-3 py-2 text-sm text-muted focus-within:ring-2 focus-within:ring-accent">
-        <SearchIcon className="h-4 w-4 shrink-0" />
-        <input
-          autoFocus
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search tools…"
-          className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted"
-        />
-      </label>
-      <ul className="min-h-0 flex-1 overflow-y-auto">
-        {results.length === 0 && <li className="px-3 py-2 text-sm text-muted">No tools found</li>}
-        {results.map((link) => (
-          <li
-            key={link.href}
-            className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-background"
-          >
-            <span className="flex min-w-0 items-center gap-2 text-sm">
-              <link.icon className="h-4 w-4 shrink-0 text-muted" />
-              <span className="truncate">{link.label}</span>
-            </span>
-            <span className="flex shrink-0 gap-1">
-              <button
-                type="button"
-                onClick={() => onPick(link.href, "row")}
-                title="Tile right"
-                aria-label={`Tile ${link.label} to the right`}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground"
-              >
-                <svg {...svgProps("h-4 w-4")}>
-                  <path d="M12 5l7 7-7 7M5 12h14" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => onPick(link.href, "col")}
-                title="Tile down"
-                aria-label={`Tile ${link.label} down`}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground"
-              >
-                <svg {...svgProps("h-4 w-4")}>
-                  <path d="M12 19l7-7-7-7M12 5v14" />
-                </svg>
-              </button>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>,
-    document.body,
-  );
-}
-
-/** One pane's own top-right control bar (the split button, and a close button once there's more
-    than one pane to collapse back into) plus the actual tool, mounted via `TOOL_COMPONENTS`. */
+    There used to be an "active pane" accent ring here too, gated to only show once there's more
+    than one pane — but even gated correctly, it kept being reported as an unwanted border (most
+    recently specifically on Community/Account while genuinely tiled with a sibling, where it *was*
+    behaving as designed), so it's been removed outright rather than re-tuned a third time; the
+    sidebar already reflects which pane is active (`Sidebar.tsx`'s `NavItems`), so this wasn't the
+    only way to tell. */
 function Pane({
   href,
-  active,
   canClose,
   onFocus,
-  onSplit,
+  onRequestSplit,
   onClose,
 }: {
   href: string;
-  active: boolean;
   canClose: boolean;
   onFocus: () => void;
-  onSplit: (direction: "row" | "col", newHref: string) => void;
+  onRequestSplit: (edge: PaneEdge) => void;
   onClose: () => void;
 }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
   const Component = TOOL_COMPONENTS[href];
 
   return (
     <div
       onPointerDownCapture={onFocus}
-      className={`relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden transition-shadow ${
-        active ? "ring-1 ring-inset ring-accent/40" : ""
-      }`}
+      className="group relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden"
     >
-      <div className="absolute right-2 top-2 z-20 flex gap-1">
+      {EDGES.map((edge) => (
         <button
-          ref={buttonRef}
+          key={edge}
           type="button"
-          onClick={() => setPickerOpen((open) => !open)}
-          aria-label="Split this pane"
+          onClick={() => onRequestSplit(edge)}
+          aria-label={`Split ${edge === "up" || edge === "down" ? edge : `to the ${edge}`}`}
           title="Split this pane"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 text-muted shadow-sm hover:bg-surface-hover hover:text-foreground"
+          className={`absolute z-20 flex h-7 w-7 items-center justify-center rounded-full bg-surface/90 text-muted opacity-0 shadow-sm transition-opacity hover:bg-surface-hover hover:text-foreground group-hover:opacity-100 ${EDGE_BUTTON_POSITION[edge]}`}
         >
-          <SplitRightIcon className="h-4 w-4" />
+          <EdgeIcon edge={edge} className="h-3.5 w-3.5" />
         </button>
-        {canClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close this pane"
-            title="Close this pane"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 text-muted shadow-sm hover:bg-surface-hover hover:text-danger"
-          >
-            <CloseIcon className="h-4 w-4" />
-          </button>
+      ))}
+      {canClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close this pane"
+          title="Close this pane"
+          // `right-3 top-3` rather than the tighter `right-2 top-2` every other corner button in
+          // this app uses — a pane tiled at the *right* edge of the whole tiling area has this
+          // button sitting right where `AppShell`'s own `lg:rounded-xl` outer corner curves
+          // inward, which at the tighter inset read as badly/awkwardly positioned (reported
+          // directly, with a screenshot). The extra inset clears that corner; it's a no-op for
+          // every other pane position, which has plenty of room either way.
+          className="absolute right-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 text-muted shadow-sm hover:bg-surface-hover hover:text-danger"
+        >
+          <CloseIcon className="h-4 w-4" />
+        </button>
+      )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {Component ? (
+          <Component />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-1 p-4 text-center text-sm text-muted">
+            <p>This tool isn&apos;t available anymore.</p>
+            <p className="text-xs">Use one of the edge buttons to pick a different one.</p>
+          </div>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {Component ? <Component /> : <p className="p-4 text-sm text-muted">Unknown tool.</p>}
-      </div>
-      {pickerOpen && (
-        <SplitPicker
-          anchorRef={buttonRef}
-          onClose={() => setPickerOpen(false)}
-          onPick={(newHref, direction) => {
-            onSplit(direction, newHref);
-            setPickerOpen(false);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -299,21 +206,19 @@ function SplitContainer({
 
 function PaneNode({
   node,
-  activePaneId,
   canClose,
   onFocus,
-  onSplit,
+  onRequestSplit,
   onClose,
   onResize,
 }: {
   node: PaneTree;
-  activePaneId: string;
   /** Whether *any* pane can be closed right now — false when this is the only pane left, since
       closing it would have nothing to collapse into (`removePane` would just no-op anyway, but
       showing a close button that does nothing is its own small confusion worth avoiding). */
   canClose: boolean;
   onFocus: (id: string) => void;
-  onSplit: (targetId: string, direction: "row" | "col", newHref: string) => void;
+  onRequestSplit: (targetId: string, edge: PaneEdge) => void;
   onClose: (targetId: string) => void;
   onResize: (splitId: string, sizes: [number, number]) => void;
 }) {
@@ -321,10 +226,9 @@ function PaneNode({
     return (
       <Pane
         href={node.href}
-        active={node.id === activePaneId}
         canClose={canClose}
         onFocus={() => onFocus(node.id)}
-        onSplit={(direction, newHref) => onSplit(node.id, direction, newHref)}
+        onRequestSplit={(edge) => onRequestSplit(node.id, edge)}
         onClose={() => onClose(node.id)}
       />
     );
@@ -333,19 +237,17 @@ function PaneNode({
     <SplitContainer node={node} onResize={(sizes) => onResize(node.id, sizes)}>
       <PaneNode
         node={node.children[0]}
-        activePaneId={activePaneId}
         canClose={canClose}
         onFocus={onFocus}
-        onSplit={onSplit}
+        onRequestSplit={onRequestSplit}
         onClose={onClose}
         onResize={onResize}
       />
       <PaneNode
         node={node.children[1]}
-        activePaneId={activePaneId}
         canClose={canClose}
         onFocus={onFocus}
-        onSplit={onSplit}
+        onRequestSplit={onRequestSplit}
         onClose={onClose}
         onResize={onResize}
       />
@@ -353,68 +255,96 @@ function PaneNode({
   );
 }
 
-/** Whether a single pane (not the real `Pane` — this one never shows a close button, since it's
-    the only thing on screen) should instead be shown, because either the saved tree is a single
-    leaf, or the screen is too narrow for a multi-pane arrangement to be usable at all (dragging a
-    hairline divider on a phone isn't a reasonable interaction — the same "needs a desktop-sized
-    screen" reasoning `NAV_LINKS`'s own `desktopOnly` flag uses for Recorder elsewhere in this
-    app). The saved multi-pane tree itself isn't lost on a narrow screen, just not rendered as one
-    — reopening on a wide enough screen shows the full arrangement again. */
-function useIsDesktop() {
-  const [isDesktop, setIsDesktop] = useState(true);
-  useEffect(() => {
-    const mql = window.matchMedia("(min-width: 1024px)");
-    const update = () => setIsDesktop(mql.matches);
-    update();
-    mql.addEventListener("change", update);
-    return () => mql.removeEventListener("change", update);
-  }, []);
-  return isDesktop;
-}
-
 /**
  * "Advanced layouts" — an opt-in tiling window manager for the main content area. Off by default
  * (`lib/useTilingLayout.ts`'s `enabled`); `AppShell.tsx` only ever mounts this component once
- * that's true. Every pane renders its tool directly from `TOOL_COMPONENTS`, bypassing the Next.js
- * router entirely for the panes that aren't "the one matching the current URL" — there's no way
- * to have Next's own router simultaneously render several different routes' pages at once, so
- * this keeps its own tree of live, lazily-imported tool components instead, and only *reflects*
- * the active pane's href into the real URL (via `router.replace`, never `push` — tiling around
- * shouldn't flood the back button with history entries) so a copied link still opens the right
- * tool for whoever you send it to. That link only ever restores a single tool, never the whole
- * tiled arrangement — the arrangement itself is this browser's own `localStorage`, deliberately
- * not something encoded in the URL.
+ * that's true *and* the screen is desktop-sized (that check lives in `AppShell`, not here — see
+ * its own comment for why). Every pane renders its tool directly from `TOOL_COMPONENTS`, bypassing
+ * the Next.js router entirely for the panes that aren't "the one matching the current URL" —
+ * there's no way to have Next's own router simultaneously render several different routes' pages
+ * at once, so this keeps its own tree of live, lazily-imported tool components instead, and only
+ * *reflects* the active pane's href into the real URL (via `router.replace`, never `push` — tiling
+ * around shouldn't flood the back button with history entries) so a copied link still opens the
+ * right tool for whoever you send it to. That link only ever restores a single tool, never the
+ * whole tiled arrangement — the arrangement itself is this browser's own `localStorage`,
+ * deliberately not something encoded in the URL.
+ *
+ * The sidebar (and the `/` command palette, which navigates through the same Next.js router) stay
+ * in sync *both* ways: this component's own navigation calls move the URL to match whichever pane
+ * is active, and clicking a sidebar nav link or picking a result from `/` search retargets the
+ * *active* pane's tool instead of doing nothing visible (Next still resolves that route's real
+ * page into `children`, which `AppShell` ignores the whole time tiling is on, so without this a
+ * click just silently went nowhere from the user's point of view). The `pathname`-watching effect
+ * below is what closes that loop: it compares the live URL against the active pane's own href on
+ * every render, and only ever acts when they've drifted apart — which happens from an outside
+ * navigation, never from this component's own `router.replace` calls (those always set the URL to
+ * exactly what the pane's href already just became), so there's no feedback loop.
+ *
+ * An edge button doesn't open any UI of its own — `requestPaneSplit` just records which pane and
+ * which direction (`lib/useTilingLayout.ts`'s `requestSplit`) and opens the *real* `/` command
+ * palette on the pane's behalf; `CommandPalette.tsx`'s own `go()` checks for that pending request
+ * and performs the split instead of its usual navigation when one exists.
  */
 export default function TilingLayout() {
   const pathname = usePathname();
-  const router = useRouter();
   const state = useTilingState();
-  const isDesktop = useIsDesktop();
+  // The last pathname this component actually reacted to — *not* just "whatever `active.href`
+  // currently says," which is what the outside-navigation effect below used to compare against
+  // directly. That compared-every-render approach is what caused a real bug, reported directly
+  // ("if i have 2 windows open... go back to the metronome it will refresh the window and the
+  // metronome will stop"): focusing a different pane used to call `router.replace()` purely to
+  // keep the address bar in sync, and that alone — regardless of which pane or tool — was traced
+  // to remounting whichever `TOOL_COMPONENTS` entry the navigation targeted (confirmed with
+  // instance-id tracing: `Pane`/`AppShell` stayed perfectly stable while the tool component
+  // underneath got a fresh instance, losing all its state, exactly when and only when
+  // `router.replace`/`push` targeted that tool's own href). Focus/close/split now update the
+  // address bar via `syncAddressBar` (raw History API, bypassing Next's router entirely — see its
+  // own doc comment) instead, which never triggers that remount, but also never updates Next's own
+  // `usePathname()` — so comparing `pathname` against the active pane's href on *every* render
+  // (including ones only triggered by `activePaneId` changing from a focus click) would misfire,
+  // treating our own now-stale `pathname` as a fake "outside navigation" and overwriting the pane
+  // we just focused. Tracking the last `pathname` *value itself* this effect has seen fixes that:
+  // it only reacts when Next's own router genuinely moved (a sidebar Link, `/` search, or
+  // browser back/forward), which is the only case it needs to catch.
+  const lastSeenPathnameRef = useRef(pathname);
 
-  // Seed a single pane showing wherever you currently are, the first time this ever mounts (or
-  // after a reset) — not some fixed default tool that might not be where you were.
+  // Seed a single pane showing wherever you currently are — a fallback for the rare case this
+  // mounts with no tree at all (normally `AdvancedLayoutsButton`'s own click handler already seeds
+  // one at the exact moment "Advanced layouts" is turned on, using the page you were on then; this
+  // only matters if that somehow didn't happen first).
   useEffect(() => {
     if (state.tree) return;
     const root = createLeaf(pathname);
     updateTilingState({ tree: root, activePaneId: root.id });
   }, [state.tree, pathname]);
 
+  // An outside navigation (a sidebar Link, or picking a result in `/` search) changed the real URL
+  // without going through any of this component's own handlers below — retarget the active pane's
+  // tool to match, the same way clicking a nav link already does in the non-tiling page.
+  useEffect(() => {
+    if (pathname === lastSeenPathnameRef.current) return;
+    lastSeenPathnameRef.current = pathname;
+    if (!state.tree || !state.activePaneId) return;
+    const active = collectLeaves(state.tree).find((l) => l.id === state.activePaneId);
+    if (!active || active.href === pathname) return;
+    updateTilingState({ tree: updateLeafHref(state.tree, state.activePaneId, pathname) });
+  }, [pathname, state.tree, state.activePaneId]);
+
   if (!state.tree || !state.activePaneId) {
-    // The brief instant before the effect above runs — nothing meaningful to show yet.
+    // The brief instant before the seeding effect above runs — nothing meaningful to show yet.
     return null;
   }
 
   function focusPane(id: string) {
-    if (id === state.activePaneId) return; // already active — skip the redundant router call
+    if (id === state.activePaneId) return; // already active — nothing to do
     const leaf = collectLeaves(state.tree!).find((l) => l.id === id);
     updateTilingState({ activePaneId: id });
-    if (leaf && leaf.href !== pathname) router.replace(leaf.href, { scroll: false });
+    if (leaf) syncAddressBar(leaf.href);
   }
 
-  function splitPane(targetId: string, direction: "row" | "col", newHref: string) {
-    const { tree, newPaneId } = splitLeaf(state.tree!, targetId, direction, newHref);
-    updateTilingState({ tree, activePaneId: newPaneId });
-    if (newHref !== pathname) router.replace(newHref, { scroll: false });
+  function requestPaneSplit(targetId: string, edge: PaneEdge) {
+    setPendingSplit(targetId, edge);
+    window.dispatchEvent(new Event(OPEN_PALETTE_EVENT));
   }
 
   function closePane(targetId: string) {
@@ -424,35 +354,19 @@ export default function TilingLayout() {
     const stillActive = leaves.some((l) => l.id === state.activePaneId);
     const nextActive = stillActive ? leaves.find((l) => l.id === state.activePaneId)! : leaves[0];
     updateTilingState({ tree: next, activePaneId: nextActive.id });
-    if (nextActive.href !== pathname) router.replace(nextActive.href, { scroll: false });
+    syncAddressBar(nextActive.href);
   }
 
   function resizeSplitNode(splitId: string, sizes: [number, number]) {
     updateTilingState({ tree: resizeSplit(state.tree!, splitId, sizes) });
   }
 
-  if (!isDesktop) {
-    const leaves = collectLeaves(state.tree);
-    const active = leaves.find((l) => l.id === state.activePaneId) ?? leaves[0];
-    return (
-      <Pane
-        href={active.href}
-        active
-        canClose={false}
-        onFocus={() => {}}
-        onSplit={() => {}}
-        onClose={() => {}}
-      />
-    );
-  }
-
   return (
     <PaneNode
       node={state.tree}
-      activePaneId={state.activePaneId}
       canClose={collectLeaves(state.tree).length > 1}
       onFocus={focusPane}
-      onSplit={splitPane}
+      onRequestSplit={requestPaneSplit}
       onClose={closePane}
       onResize={resizeSplitNode}
     />

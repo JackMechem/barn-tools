@@ -3,6 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { SearchIcon, filterLinks, groupByCategory, svgProps } from "@/components/tools";
+import {
+  applyPendingSplit,
+  clearPendingSplit,
+  syncAddressBar,
+  useTilingState,
+} from "@/lib/useTilingLayout";
 
 export const OPEN_PALETTE_EVENT = "open-command-palette";
 
@@ -16,13 +22,22 @@ function EnterIcon({ className }: { className?: string }) {
 
 function Palette({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const { pendingSplit } = useTilingState();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
 
   const results = filterLinks(query);
   const groups = groupByCategory(results);
-  const activeIndex = Math.min(active, Math.max(0, results.length - 1));
+  // The order results actually render in — grouped by category, not `results`' own flat order
+  // (`filterLinks` returns matches in `NAV_LINKS`' declaration order, which isn't the same as
+  // `CATEGORIES`' display order `groupByCategory` reorders them into). `go`/`activeIndex`/arrow-key
+  // navigation all need to index into *this*, not `results` directly — indexing into `results`
+  // while assigning each row's index during the `groups` render loop (the bug this replaces,
+  // reported directly: "the search menu doesn't always open the tool I click on") meant `go(i)`
+  // almost always resolved to a different tool than the one actually at position `i` on screen.
+  const ordered = groups.flatMap((g) => g.items);
+  const activeIndex = Math.min(active, Math.max(0, ordered.length - 1));
 
   useEffect(() => {
     listRef.current
@@ -31,16 +46,29 @@ function Palette({ onClose }: { onClose: () => void }) {
   }, [activeIndex]);
 
   function go(index: number) {
-    const target = results[index];
+    const target = ordered[index];
     if (!target) return;
-    router.push(target.href);
+    // An edge button in `components/TilingLayout.tsx` opened this palette on a pane's behalf
+    // (`requestSplit`) — picking a result here splits that pane instead of navigating the whole
+    // page. `applyPendingSplit` already updates the pane tree itself; this only still owns moving
+    // the URL, same as an ordinary pick. Uses `syncAddressBar` (raw History API), not
+    // `router.replace` — routing a tiling-internal address-bar update through Next's own router
+    // was traced to a real bug (see `TilingLayout.tsx`'s own doc comment): navigating to a URL
+    // matching a `TOOL_COMPONENTS` entry remounts that tool wherever else it's already showing,
+    // which would lose a sibling pane's running state the instant a split picked a tool that
+    // happened to already be open elsewhere.
+    if (applyPendingSplit(target.href)) {
+      syncAddressBar(target.href);
+    } else {
+      router.push(target.href);
+    }
     onClose();
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive(Math.min(results.length - 1, activeIndex + 1));
+      setActive(Math.min(ordered.length - 1, activeIndex + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActive(Math.max(0, activeIndex - 1));
@@ -75,14 +103,14 @@ function Palette({ onClose }: { onClose: () => void }) {
               setQuery(e.target.value);
               setActive(0);
             }}
-            placeholder="Search..."
+            placeholder={pendingSplit ? "Pick a tool to tile…" : "Search..."}
             aria-label="Search tools"
             className="min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-muted"
           />
         </div>
 
         <ul ref={listRef} role="listbox" className="max-h-80 overflow-y-auto p-2">
-          {results.length === 0 && <li className="px-4 py-3 text-muted">No tools found</li>}
+          {ordered.length === 0 && <li className="px-4 py-3 text-muted">No tools found</li>}
           {(() => {
             let index = -1;
             return groups.map(({ category, items }) => (
@@ -151,5 +179,14 @@ export default function CommandPalette() {
     };
   }, []);
 
-  return open ? <Palette onClose={() => setOpen(false)} /> : null;
+  function close() {
+    setOpen(false);
+    // Covers every way the palette can close without a pick (Escape, clicking the backdrop) — a
+    // pick already clears this itself (`applyPendingSplit`), so this is a no-op then; it only
+    // matters for the "opened a pane's split picker, then backed out" case, so a *later*, ordinary
+    // "/" search doesn't inherit a stale pane/direction from one that was abandoned.
+    clearPendingSplit();
+  }
+
+  return open ? <Palette onClose={close} /> : null;
 }

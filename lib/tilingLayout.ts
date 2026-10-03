@@ -2,12 +2,14 @@
  * Pure data model for "Advanced layouts" — an opt-in, tiling-window-manager-style arrangement of
  * the main content area into multiple resizable panes, each showing a different tool. A
  * `PaneTree` is a binary tree: a `PaneLeaf` shows one tool at one href; a `PaneSplit` holds exactly
- * two children side by side (`"row"`, i.e. "tile right") or stacked (`"col"`, i.e. "tile down"),
- * with `sizes` as a `[first, second]` percentage pair summing to 100. No "up"/"left" direction
- * exists — matching the request this was built for, which only ever asked for right/down splits;
- * a pane can still end up visually on the left/top of its sibling, it's just never something you
- * explicitly choose, the same way a real tiling WM's "split" action works.
+ * two children side by side (`"row"`) or stacked (`"col"`), with `sizes` as a `[first, second]`
+ * percentage pair summing to 100. `splitLeaf` takes a `PaneEdge` ("up"/"down"/"left"/"right" — one
+ * per edge button `components/TilingLayout.tsx` puts on every pane) and derives both `direction`
+ * and *which* child the new pane becomes from it, since "split left" and "split right" are the
+ * same `"row"` direction with the new pane on opposite sides.
  */
+
+export type PaneEdge = "up" | "down" | "left" | "right";
 
 export type PaneLeaf = {
   type: "leaf";
@@ -29,18 +31,21 @@ export function createLeaf(href: string): PaneLeaf {
   return { type: "leaf", id: crypto.randomUUID(), href };
 }
 
-/** Splits `targetId` (which must be a leaf) into a new split node — the existing leaf stays put,
-    a brand new leaf showing `newHref` is added as its sibling. Returns the whole new tree plus the
-    new leaf's id (so the caller can make it the active pane). A no-op (same tree, a fresh unused
-    id) if `targetId` isn't found — shouldn't normally happen, since the split button only ever
-    knows about panes that actually exist. */
+/** Splits `targetId` (which must be a leaf) into a new split node along `edge` — the existing leaf
+    stays put, a brand new leaf showing `newHref` joins it as a sibling, positioned before or after
+    depending on which edge was clicked ("left"/"up" put the new pane first; "right"/"down" put it
+    second). Returns the whole new tree plus the new leaf's id (so the caller can make it the
+    active pane). A no-op (same tree, a fresh unused id) if `targetId` isn't found — shouldn't
+    normally happen, since a pane's own edge buttons only ever know about that pane. */
 export function splitLeaf(
   tree: PaneTree,
   targetId: string,
-  direction: "row" | "col",
+  edge: PaneEdge,
   newHref: string,
 ): { tree: PaneTree; newPaneId: string } {
   const newLeaf = createLeaf(newHref);
+  const direction: "row" | "col" = edge === "left" || edge === "right" ? "row" : "col";
+  const newGoesFirst = edge === "left" || edge === "up";
 
   function recurse(node: PaneTree): PaneTree {
     if (node.type === "leaf") {
@@ -50,7 +55,7 @@ export function splitLeaf(
         id: crypto.randomUUID(),
         direction,
         sizes: [50, 50],
-        children: [node, newLeaf],
+        children: newGoesFirst ? [newLeaf, node] : [node, newLeaf],
       };
     }
     return { ...node, children: [recurse(node.children[0]), recurse(node.children[1])] };
@@ -94,4 +99,14 @@ export function resizeSplit(tree: PaneTree, splitId: string, sizes: [number, num
 export function collectLeaves(tree: PaneTree): PaneLeaf[] {
   if (tree.type === "leaf") return [tree];
   return [...collectLeaves(tree.children[0]), ...collectLeaves(tree.children[1])];
+}
+
+/** Changes one leaf's own href in place — what retargets the *active* pane's tool when you
+    navigate from the sidebar or the `/` search instead of splitting a new pane. */
+export function updateLeafHref(tree: PaneTree, leafId: string, href: string): PaneTree {
+  if (tree.type === "leaf") return tree.id === leafId ? { ...tree, href } : tree;
+  return {
+    ...tree,
+    children: [updateLeafHref(tree.children[0], leafId, href), updateLeafHref(tree.children[1], leafId, href)],
+  };
 }

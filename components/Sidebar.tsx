@@ -16,7 +16,10 @@ import {
   groupByCategory,
   svgProps,
 } from "@/components/tools";
+import { collectLeaves, createLeaf } from "@/lib/tilingLayout";
+import { TILEABLE_LINKS, TOOL_COMPONENTS } from "@/lib/toolRegistry";
 import { useFavorites } from "@/lib/useFavorites";
+import { useIsDesktop } from "@/lib/useIsDesktop";
 import { updateTilingState, useTilingState } from "@/lib/useTilingLayout";
 
 const STORAGE_KEY = "jam-practice-sidebar";
@@ -198,6 +201,19 @@ function NavItems({
 }) {
   const pathname = usePathname();
   const { favorites, toggleFavorite, isAuthenticated } = useFavorites();
+  // Which link counts as "active" — normally just the real URL, but while "Advanced layouts" is
+  // genuinely in effect (on, and desktop-sized — the same condition `AppShell.tsx` gates
+  // `TilingLayout` on), focusing a different pane no longer moves Next's own `usePathname()` (see
+  // `lib/useTilingLayout.ts`'s `syncAddressBar` for why — routing that through Next's router was
+  // traced to a real pane-losing-its-state bug), so the sidebar has to read the *active pane's own
+  // href* directly instead, or it would silently stop following pane focus changes.
+  const tilingState = useTilingState();
+  const isDesktop = useIsDesktop();
+  const activePaneHref =
+    tilingState.enabled && isDesktop && tilingState.tree && tilingState.activePaneId
+      ? collectLeaves(tilingState.tree).find((l) => l.id === tilingState.activePaneId)?.href
+      : undefined;
+  const effectivePathname = activePaneHref ?? pathname;
   const filtered = filterLinks(query);
   const groups = groupByCategory(filtered);
   // A subset of `filtered`, in NAV_LINKS' own order (stable regardless of favoriting order) —
@@ -208,7 +224,7 @@ function NavItems({
     : [];
 
   function renderLink({ href, label, icon: Icon, desktopOnly }: NavLink) {
-    const active = pathname === href;
+    const active = effectivePathname === href;
     // On phones, tools that need a bigger screen are shown greyed out and can't be opened.
     if (large && desktopOnly) {
       return (
@@ -347,34 +363,52 @@ function ThemeButton({
 
 /** Toggles "Advanced layouts" (`components/TilingLayout.tsx`) straight on/off — off by default so
     the feature stays invisible until someone deliberately turns it on, per an explicit request
-    ("I want this feature disabled by default so it's not confusing"). A plain toggle button, not
-    a switch row with a separate label — same shape as `ThemeButton` right above, just with a
-    checkmark standing in for "on" when expanded (there's no room for a second control next to the
-    icon+label when collapsed, so `title` alone carries the state there, same as every other
-    collapsed-sidebar button). */
-function AdvancedLayoutsButton({
-  collapsed,
-  large,
-}: {
-  collapsed?: boolean;
-  large?: boolean;
-}) {
+    ("I want this feature disabled by default so it's not confusing"). Desktop-only: this button
+    is only ever mounted in the desktop `<aside>` footer, never the mobile menu, per a direct
+    follow-up request to disable the whole feature on mobile outright — `AppShell.tsx` backs that
+    up independently (it never renders `TilingLayout` below the `lg` breakpoint regardless of what
+    this button last set), but there's no reason to even show the option somewhere it can't do
+    anything.
+
+    Turning it *on* also resets the pane tree to a single fresh pane right here, seeded from
+    `usePathname()` — the page you're actually looking at this instant, not whatever was last
+    saved. Fixes a real bug reported directly ("when I initially turned the feature on, the tool I
+    was using stopped displaying and there was text saying 'unknown tool'"): `TilingLayout`'s own
+    seeding effect only ever fires when there's *no* saved tree at all, so turning the feature back
+    on after having used (and left) it earlier silently resumed whatever stale tree was last saved
+    — showing the wrong tool, or "unknown tool" if that stale tree somehow no longer matched a real
+    page. Resetting explicitly, right at the moment of enabling, means every time you turn this on
+    you get exactly the page you're on, full stop — `TilingLayout`'s own fallback seeding effect
+    is now just a safety net for the rare case this somehow didn't run first. Falls back to the
+    first tileable tool (`TILEABLE_LINKS[0]`) if you happen to enable it from a page that isn't a
+    tool at all (e.g. the home page), since there's no sensible single tool to seed from there. */
+function AdvancedLayoutsButton({ collapsed }: { collapsed?: boolean }) {
   const { enabled } = useTilingState();
+  const pathname = usePathname();
+
+  function toggle() {
+    if (enabled) {
+      updateTilingState({ enabled: false });
+      return;
+    }
+    const seedHref = TOOL_COMPONENTS[pathname] ? pathname : TILEABLE_LINKS[0].href;
+    const root = createLeaf(seedHref);
+    updateTilingState({ enabled: true, tree: root, activePaneId: root.id });
+  }
+
   return (
     <button
       type="button"
-      onClick={() => updateTilingState({ enabled: !enabled })}
+      onClick={toggle}
       title={collapsed ? `Advanced layouts${enabled ? " (on)" : ""}` : undefined}
       aria-pressed={enabled}
-      className={`flex w-full items-center gap-3 ${large ? "rounded-xl" : "rounded-lg"} px-3 font-medium transition-colors hover:bg-surface-hover ${
+      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-surface-hover ${
         enabled ? "text-accent" : "text-muted hover:text-foreground"
-      } ${large ? "py-3 text-base" : "py-2 text-sm"} ${collapsed ? "justify-center" : ""}`}
+      } ${collapsed ? "justify-center" : ""}`}
     >
-      <TilingIcon className={large ? "h-5 w-5 shrink-0" : "h-4 w-4 shrink-0"} />
-      {!collapsed && <span className="flex-1 text-left">Advanced layouts (Beta)</span>}
-      {!collapsed && enabled && (
-        <CheckIcon className={large ? "h-4 w-4 shrink-0" : "h-3.5 w-3.5 shrink-0"} />
-      )}
+      <TilingIcon className="h-4 w-4 shrink-0" />
+      {!collapsed && <span className="flex-1 text-left">Advanced layouts</span>}
+      {!collapsed && enabled && <CheckIcon className="h-3.5 w-3.5 shrink-0" />}
     </button>
   );
 }
@@ -477,7 +511,6 @@ export default function Sidebar() {
             <PracticeTimerWidget />
             <AccountMenu large onNavigate={() => setMobileOpen(false)} />
             <ThemeButton large onClick={() => setThemeOpen(true)} />
-            <AdvancedLayoutsButton large />
           </div>
         </div>
       )}
